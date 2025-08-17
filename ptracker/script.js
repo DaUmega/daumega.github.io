@@ -135,21 +135,21 @@ function renderCalendar() {
 
 function renderCalendarHeader() {
     const nav = document.createElement("div");
-    nav.style.gridColumn = "span 7";
-    nav.style.textAlign = "center";
-    nav.style.marginBottom = "1rem";
+    nav.className = "calendar-header";
 
     const leftBtn = document.createElement("button");
+    leftBtn.className = "nav-btn left-btn";
     leftBtn.textContent = "◀";
     leftBtn.onclick = prevMonth;
 
     const rightBtn = document.createElement("button");
+    rightBtn.className = "nav-btn right-btn";
     rightBtn.textContent = "▶";
     rightBtn.onclick = nextMonth;
 
     const monthLabel = document.createElement("span");
-    monthLabel.textContent = ` ${new Date(currentYear, currentMonth).toLocaleString("default",{ month:"long", year:"numeric" })} `;
-    monthLabel.style.fontWeight = "bold";
+    monthLabel.className = "month-label";
+    monthLabel.textContent = ` ${new Date(currentYear, currentMonth).toLocaleString("default", { month: "long", year: "numeric" })} `;
 
     nav.append(leftBtn, monthLabel, rightBtn);
     calendarEl.appendChild(nav);

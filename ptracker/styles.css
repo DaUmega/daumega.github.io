@@ -39,6 +39,35 @@ h1 { text-align: center; }
 	text-align: center;
 	font-weight: bold;
 	margin-bottom: 4px;
+	font-size: 1.2rem;
+}
+
+.calendar-header {
+	grid-column: span 7;
+	text-align: center;
+	margin-bottom: 1rem;
+	font-size: 2.5rem;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 1rem;
+}
+
+.nav-btn {
+	font-size: 2.5rem;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: #0f2ee0;
+}
+
+.nav-btn:hover {
+	color: #0891e0;
+}
+
+.month-label {
+	font-weight: bold;
+	font-size: 2.5rem;
 }
 
 .calendar {
@@ -69,9 +98,10 @@ h1 { text-align: center; }
 
 .day span {
 	position: absolute;
-	top: 4px;
-	right: 4px;
-	font-size: 0.75rem;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 2rem;
 }
 
 .actions {
@@ -89,6 +119,7 @@ h1 { text-align: center; }
 	color: white;
 	border-radius: 6px;
 	transition: background 0.2s;
+	font-size: 1.5rem;
 }
 .actions button:hover { background: #45a049; }
 
