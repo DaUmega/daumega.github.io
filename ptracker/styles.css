@@ -135,6 +135,7 @@ h1 { text-align: center; }
 	z-index: 1000;
 	display: none;
 	max-width: 300px;
+	font-size: 2rem;
 }
 .popup button {
 	margin: 0.25rem 0;
@@ -144,6 +145,7 @@ h1 { text-align: center; }
 	border: 1px solid #ccc;
 	background: #eee;
 	cursor: pointer;
+	font-size: 2rem;
 }
 .popup button:hover { background: #ddd; }
 
