@@ -15,6 +15,7 @@ A lightweight, private period tracking app.
 - 100% free, open-source, and ad-free  
 - No accounts or logins required  
 - All data is stored **locally on your device**  
+- Uses intelligent math to **predict future cycles and ovulation** based on your personal history  
 - Works on desktop and mobile  
 
 👉 Try it here: [https://daumega.github.io/ptracker/index.html](https://daumega.github.io/ptracker/index.html)
