@@ -1,36 +1,42 @@
+/* ====== Base (Desktop) ====== */
 body {
 	font-family: Arial, sans-serif;
-	max-width: 700px;
-	margin: 2rem auto;
-	padding: 1rem;
+	max-width: 900px;
+	margin: 40px auto;
+	padding: 20px;
 	background: #fefefe;
 	color: #333;
+	font-size: 18px;
+	line-height: 1.6;
 }
 
-h1 { text-align: center; }
+h1 {
+	text-align: center;
+	font-size: 40px;
+	margin-bottom: 30px;
+}
 
 .notice {
-	font-size: 0.9rem;
-	color: #666;
-	margin-bottom: 1rem;
-	padding: 0.5rem;
+	font-size: 16px;
+	color: #555;
+	margin-bottom: 20px;
+	padding: 12px;
 	background: #f9f9f9;
 	border: 1px solid #ddd;
-	border-radius: 6px;
+	border-radius: 8px;
 }
 
 #stats {
 	background: #f0f8ff;
-	padding: 0.75rem;
-	border-radius: 6px;
+	padding: 16px;
+	border-radius: 8px;
 	border: 1px solid #ccc;
-	margin-bottom: 1rem;
-	font-size: 0.95rem;
-	line-height: 1.4;
+	margin-bottom: 20px;
+	font-size: 17px;
 }
 
 .calendar-container {
-	margin-top: 1rem;
+	margin-top: 20px;
 }
 
 .weekdays {
@@ -38,52 +44,49 @@ h1 { text-align: center; }
 	grid-template-columns: repeat(7, 1fr);
 	text-align: center;
 	font-weight: bold;
-	margin-bottom: 4px;
-	font-size: 1.2rem;
+	margin-bottom: 6px;
+	font-size: 18px;
 }
 
 .calendar-header {
 	grid-column: span 7;
 	text-align: center;
-	margin-bottom: 1rem;
-	font-size: 2.5rem;
+	margin-bottom: 20px;
+	font-size: 28px;
 	display: flex;
 	justify-content: center;
 	align-items: center;
-	gap: 1rem;
+	gap: 20px;
 }
 
 .nav-btn {
-	font-size: 2.5rem;
+	font-size: 28px;
 	background: none;
 	border: none;
 	cursor: pointer;
 	color: #0f2ee0;
 }
-
-.nav-btn:hover {
-	color: #0891e0;
-}
+.nav-btn:hover { color: #0891e0; }
 
 .month-label {
 	font-weight: bold;
-	font-size: 2.5rem;
+	font-size: 28px;
 }
 
 .calendar {
 	display: grid;
 	grid-template-columns: repeat(7, 1fr);
-	gap: 4px;
+	gap: 6px;
 }
 
 .day {
 	border: 1px solid #ddd;
-	padding: 10px;
-	min-height: 60px;
+	padding: 14px;
+	min-height: 80px;
 	cursor: pointer;
 	position: relative;
-	border-radius: 6px;
-	font-size: 0.9rem;
+	border-radius: 8px;
+	font-size: 16px;
 	display: flex;
 	align-items: flex-start;
 	justify-content: flex-end;
@@ -101,53 +104,73 @@ h1 { text-align: center; }
 	top: 50%;
 	left: 50%;
 	transform: translate(-50%, -50%);
-	font-size: 2rem;
+	font-size: 26px;
 }
 
+/* ====== Actions buttons (bottom bar style) ====== */
 .actions {
-	margin-top: 1rem;
+	margin-top: 20px;
 	display: flex;
-	gap: 1rem;
-	flex-wrap: wrap;
-	justify-content: center;
+	gap: 10px;
 }
+
 .actions button {
-	padding: 0.5rem 1rem;
+	flex: 1;
+	box-sizing: border-box;
+	white-space: nowrap;     
+	text-overflow: ellipsis;
+	overflow: hidden;
+	padding: 1em;
 	cursor: pointer;
 	border: none;
 	background: #4CAF50;
 	color: white;
-	border-radius: 6px;
+	border-radius: 10px;
 	transition: background 0.2s;
-	font-size: 1.5rem;
+	font-size: clamp(14px, 2vw, 20px);
 }
 .actions button:hover { background: #45a049; }
 
+/* ====== Popup ====== */
 .popup {
 	position: fixed;
 	top: 50%; left: 50%;
 	transform: translate(-50%, -50%);
 	background: white;
-	padding: 1rem;
+	padding: 20px;
 	border: 1px solid #ccc;
-	border-radius: 6px;
-	box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+	border-radius: 10px;
+	box-shadow: 0 6px 16px rgba(0,0,0,0.25);
 	z-index: 1000;
 	display: none;
-	max-width: 300px;
-	font-size: 2rem;
+	max-width: 400px;
+	font-size: 20px;
+	text-align: center;
+}
+.popup h3 {
+	margin-top: 0;
+	font-size: 24px;
 }
 .popup button {
-	margin: 0.25rem 0;
+	margin: 8px 0;
 	width: 100%;
-	padding: 0.5rem;
-	border-radius: 4px;
-	border: 1px solid #ccc;
-	background: #eee;
+	padding: 12px;
+	border-radius: 8px;
+	border: none;
 	cursor: pointer;
-	font-size: 2rem;
+	font-size: clamp(14px, 2vw, 18px);
+	background: linear-gradient(135deg, #bae1ff, #89c2f0);
+	color: #023e8a;
+	font-weight: bold;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	transition: background 0.2s, transform 0.1s;
 }
-.popup button:hover { background: #ddd; }
+.popup button:hover {
+	background: linear-gradient(135deg, #89c2f0, #0077b6);
+	transform: scale(1.03);
+}
 
 .overlay {
 	position: fixed;
@@ -155,4 +178,76 @@ h1 { text-align: center; }
 	background: rgba(0,0,0,0.4);
 	display: none;
 	z-index: 999;
+}
+
+/* ====== Mobile (<= 1080px) ====== */
+@media (max-width: 1080px) {
+	body {
+		max-width: 100%;
+		margin: 0;
+		padding: 14px;
+		font-size: 16px;
+	}
+
+	h1 {
+		font-size: 32px;
+		margin-bottom: 20px;
+	}
+
+	.notice {
+		font-size: 15px;
+		padding: 12px;
+		margin-bottom: 18px;
+	}
+
+	#stats {
+		font-size: 15px;
+		padding: 14px;
+		margin-bottom: 18px;
+	}
+
+	.weekdays {
+		font-size: 16px;
+	}
+
+	.calendar-header {
+		font-size: 32px;
+		gap: 14px;
+		margin-bottom: 18px;
+	}
+	.nav-btn { font-size: 34px; }
+	.month-label { font-size: 32px; }
+
+	.calendar {
+		gap: 5px;
+	}
+
+	.day {
+		min-height: 30px;
+		font-size: 20px;
+		padding: 10px;
+	}
+	.day span { font-size: 20px; }
+
+	.actions button {
+		font-size: clamp(14px, 4vw, 18px);
+		padding: 10px;
+		border-radius: 10;
+	}
+
+	.popup {
+		max-width: 95%;
+		padding: 18px;
+		font-size: 14px;
+		border-radius: 12px;
+	}
+	.popup h3 {
+		font-size: 18px;
+		margin-bottom: 14px;
+	}
+	.popup button {
+		font-size: clamp(14px, 4vw, 16px);
+		padding: 10px;
+		margin: 10px 0;
+	}
 }

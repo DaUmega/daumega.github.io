@@ -1,7 +1,6 @@
 // -------------------- Constants & State --------------------
 const STORAGE_KEY = "periodTrackerData";
 let periods = [];
-
 let currentYear, currentMonth;
 
 const calendarEl = document.getElementById("calendar");
@@ -9,7 +8,6 @@ const popup = document.getElementById("popup");
 const overlay = document.getElementById("overlay");
 const popupDate = document.getElementById("popupDate");
 const popupContent = document.getElementById("popupContent");
-
 const exportBtn = document.getElementById("exportBtn");
 const importBtn = document.getElementById("importBtn");
 const importFile = document.getElementById("importFile");
@@ -203,7 +201,15 @@ function showPopup(date, type, info) {
 
     popupContent.append(btnStart, btnEnd);
 
-    const matchIndex = periods.findIndex(p => date >= new Date(p.start) && date <= new Date(p.end));
+    let matchIndex = -1;
+    for (let i = 0; i < periods.length; i++) {
+        const start = new Date(periods[i].start);
+        const end = new Date(periods[i].end);
+        if (isSameOrAfter(date, start) && isSameOrBefore(date, end)) {
+            matchIndex = i;
+            break;
+        }
+    }
     if (matchIndex !== -1) addEditDeleteButtons(matchIndex);
 
     if (type && info) {

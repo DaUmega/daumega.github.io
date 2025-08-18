@@ -5,6 +5,7 @@
 	--text: #333;
 }
 
+/* ====== Base Styles ====== */
 body {
 	margin: 0;
 	font-family: system-ui, sans-serif;
@@ -13,6 +14,8 @@ body {
 	display: flex;
 	flex-direction: column;
 	min-height: 100vh;
+	font-size: 1rem;
+	line-height: 1.5;
 }
 
 header {
@@ -22,15 +25,16 @@ header {
 
 header h1 {
 	margin: 0;
-	font-size: 2rem;
+	font-size: clamp(1.8rem, 5vw, 2.5rem);
 	color: var(--accent);
 }
 
 header p {
 	margin: 0.5rem 0 0;
-	font-size: 1rem;
+	font-size: clamp(0.9rem, 3vw, 1.2rem);
 }
 
+/* ====== Main Grid ====== */
 main {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -39,6 +43,7 @@ main {
 	flex: 1;
 }
 
+/* ====== Cards ====== */
 .card {
 	background: var(--card-bg);
 	border-radius: 12px;
@@ -59,36 +64,59 @@ main {
 
 .card h2 {
 	margin-top: 0;
-	font-size: 1.25rem;
+	font-size: clamp(1.2rem, 3vw, 1.5rem);
 	color: var(--accent);
 }
 
 .card p {
 	flex-grow: 1;
 	margin: 0.5rem 0 1rem;
-	font-size: 0.95rem;
+	font-size: clamp(0.9rem, 2.5vw, 1rem);
 	line-height: 1.4;
 }
 
 .card button {
 	align-self: flex-start;
-	padding: 0.5rem 1rem;
-	font-size: 1rem;
+	padding: 0.6rem 1.2rem;
+	font-size: clamp(0.9rem, 2.5vw, 1rem);
 	border: none;
 	border-radius: 6px;
 	background: var(--accent);
 	color: #fff;
 	cursor: pointer;
-	transition: background 0.2s ease;
+	transition: background 0.2s ease, transform 0.1s ease;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
 }
 
 .card button:hover {
 	background: #b02a54;
+	transform: scale(1.03);
 }
 
+/* ====== Footer ====== */
 footer {
 	text-align: center;
 	padding: 1rem;
-	font-size: 0.85rem;
+	font-size: clamp(0.8rem, 2.5vw, 0.95rem);
 	color: #777;
+}
+
+/* ====== Mobile / Small Screens ====== */
+@media (max-width: 1080px) {
+	main {
+		padding: 1rem;
+		gap: 0.8rem;
+	}
+	.card {
+		padding: 1rem;
+		max-width: 100%;
+	}
+	header h1 {
+		font-size: clamp(1.6rem, 6vw, 2rem);
+	}
+	header p {
+		font-size: clamp(0.85rem, 4vw, 1.1rem);
+	}
 }
