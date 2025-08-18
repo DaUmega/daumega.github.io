@@ -1,4 +1,4 @@
-# Daumega Tools
+# DaUmega Tools
 
 This repository contains small, privacy-friendly web apps and utilities I’ve built.  
 All tools are open source, free to use, and run directly in your browser with no tracking, no ads, and no data collection.  
