@@ -31,7 +31,7 @@ A simple, client-side loan and amortization calculator.
 - Generates an **interactive chart** of principal vs interest per payment  
 - **Download your full amortization schedule as CSV** for Excel or Google Sheets  
 
-👉 Try it here: [https://daumega.github.io/loan-calculator/index.html](https://daumega.github.io/loanCalculator/index.html)
+👉 Try it here: [https://daumega.github.io/loanCalculator/index.html](https://daumega.github.io/loanCalculator/index.html)
 
 ---
 
