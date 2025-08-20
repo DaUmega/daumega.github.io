@@ -10,7 +10,7 @@ Desktop and mobile friendly.
 
 ## Available Tools
 
-### 🌸 Period Tracker (ptracker)
+### 🌸 Period Tracker
 A lightweight, private period tracking app.
 
 - 100% free, open-source, and ad-free  
