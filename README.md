@@ -10,7 +10,7 @@ Desktop and mobile friendly.
 
 ## Available Tools
 
-### 🩸 Period Tracker (ptracker)
+### 🌸 Period Tracker (ptracker)
 A lightweight, private period tracking app.
 
 - 100% free, open-source, and ad-free  
@@ -22,7 +22,7 @@ A lightweight, private period tracking app.
 
 ---
 
-### 💰 Loan Calculator
+### 💸 Loan Calculator
 A simple, client-side loan and amortization calculator.
 
 - Calculates **regular payments**, total interest, and payoff schedule  
