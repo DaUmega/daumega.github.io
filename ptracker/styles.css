@@ -180,6 +180,24 @@ h1 {
 	z-index: 999;
 }
 
+#goBackBtn {
+	padding: 10px 16px;
+	font-size: 16px;
+	background: #ff7f50;
+	color: white;
+	border: none;
+	border-radius: 8px;
+	cursor: pointer;
+	margin: 20px auto 40px; /* space above and below */
+	display: block; /* center it */
+	transition: background 0.2s ease, transform 0.1s ease;
+}
+
+#goBackBtn:hover {
+	background: #ff6347;
+	transform: scale(1.03);
+}
+
 /* ====== Mobile (<= 1080px) ====== */
 @media (max-width: 1080px) {
 	body {

@@ -4,6 +4,11 @@ const tools = [
 		name: "Period Tracker",
 		desc: "Track your cycle and export/import data securely, all stored locally on your device.",
 		link: "ptracker/index.html"
+	},
+	{
+		name: "Loan Calculator",
+		desc: "Calculate loan payments, interest, and visualize amortization schedules with optional extra payments.",
+		link: "loanCalculator/index.html"
 	}
 ];
 

@@ -304,6 +304,10 @@ clearBtn.addEventListener("click", () => {
     }
 });
 
+document.getElementById("goBackBtn").addEventListener("click", () => {
+	window.location.href = "../index.html"; // adjust if your tools page is elsewhere
+});
+
 // -------------------- Initialization --------------------
 loadData();
 updateStats();
