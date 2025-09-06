@@ -9,7 +9,12 @@ const tools = [
 		name: "Loan Calculator",
 		desc: "Calculate loan payments, interest, and visualize amortization schedules with optional extra payments.",
 		link: "loanCalculator/index.html"
-	}
+	},
+ {
+  name: "PeerCam",
+  desc: "Turn any webcam into a secure, live-streaming camera with peer-to-peer encryption.",
+  link: "https://peercam.duckdns.org"
+ }
 ];
 
 // Populate cards
