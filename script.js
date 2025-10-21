@@ -11,9 +11,9 @@ const tools = [
 		link: "loanCalculator/index.html"
 	},
 	{
-		name: "PeerCam",
-		desc: "Turn any webcam into a secure, live-streaming camera with peer-to-peer encryption.",
-		link: "https://peercam.duckdns.org"
+		name: "PeerLive",
+		desc: "Peer-to-peer encrypted live camera app with real-time chat and customizable display names.",
+		link: "https://peerlive.duckdns.org"
 	}
 ];
 
@@ -40,5 +40,13 @@ tools.forEach(tool => {
 	container.appendChild(card);
 });
 
-// Auto year in footer
+// Auto Year in Footer
 document.getElementById("year").textContent = new Date().getFullYear();
+
+// BTC Copy Functionality
+document.getElementById("copyBTC").addEventListener("click", () => {
+	const btcAddress = document.getElementById("btcDisplay").textContent.trim();
+	navigator.clipboard.writeText(btcAddress)
+		.then(() => alert("BTC address copied to clipboard!"))
+		.catch(() => alert("Failed to copy address. Please copy manually."));
+});

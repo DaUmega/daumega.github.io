@@ -91,7 +91,7 @@ main {
 }
 
 .card button:hover {
-	background: #b02a54;
+	background: #2a19b0;
 	transform: scale(1.03);
 }
 
@@ -101,6 +101,36 @@ footer {
 	padding: 1rem;
 	font-size: clamp(0.8rem, 2.5vw, 0.95rem);
 	color: #777;
+}
+
+#donate {
+	margin-top: 0.8rem;
+}
+
+#donate p {
+	margin: 0.3rem 0;
+}
+
+#copyBTC {
+	background: #ffb100;
+	color: #222;
+	border: none;
+	padding: 0.4rem 0.8rem;
+	border-radius: 5px;
+	cursor: pointer;
+	font-size: 0.9rem;
+	transition: background 0.2s ease;
+}
+
+#copyBTC:hover {
+	background: #ffcd4c;
+}
+
+.btc-address {
+	font-family: monospace;
+	color: #555;
+	font-size: 0.85rem;
+	word-break: break-all;
 }
 
 /* ====== Mobile / Small Screens ====== */
