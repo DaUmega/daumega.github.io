@@ -1,7 +1,9 @@
 // -------------------- Constants & State --------------------
 const STORAGE_KEY = "periodTrackerData";
+const SETTINGS_KEY = "periodTrackerSettings";
 let periods = [];
 let currentYear, currentMonth;
+let settings = { alpha: 0.6 }; // per-user adaptive alpha (default 0.6)
 
 const calendarEl = document.getElementById("calendar");
 const popup = document.getElementById("popup");
@@ -48,6 +50,7 @@ const clearPopupError = () => popupContent.querySelector("#popupMessage")?.remov
 
 // -------------------- CycleMath --------------------
 const CycleMath = {
+    // Return array of recorded period lengths in days
     periodLengths() {
         return periods.map(p => {
             const start = new Date(p.start);
@@ -55,6 +58,8 @@ const CycleMath = {
             return Math.ceil((end - start) / 86400000) + 1;
         });
     },
+
+    // Return array of recorded cycle lengths (days between consecutive starts)
     cycleLengths() {
         const cycles = [];
         for (let i = 1; i < periods.length; i++) {
@@ -63,24 +68,100 @@ const CycleMath = {
         }
         return cycles;
     },
-    average(arr, fallback = 0) {
-        return arr.length ? Math.round(arr.reduce((a, b) => a + b) / arr.length) : fallback;
+
+    // Simple utility: weighted average with optional weights
+    weightedAverage(values, weights = null) {
+        if (!values.length) return 0;
+        if (!weights) return Math.round(values.reduce((a, b) => a + b) / values.length);
+        let wsum = 0, vwsum = 0;
+        for (let i = 0; i < values.length; i++) {
+            const w = weights[i] ?? 0;
+            vwsum += values[i] * w;
+            wsum += w;
+        }
+        return wsum ? Math.round(vwsum / wsum) : Math.round(values.reduce((a, b) => a + b) / values.length);
     },
+
+    // Linear regression (index -> value) to detect trend in cycle lengths
+    linearTrend(values) {
+        if (values.length < 2) return { slope: 0, intercept: values.length ? values[0] : 0 };
+        const n = values.length;
+        const xs = values.map((_, i) => i + 1); // 1..n
+        const xMean = xs.reduce((a, b) => a + b) / n;
+        const yMean = values.reduce((a, b) => a + b) / n;
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) {
+            num += (xs[i] - xMean) * (values[i] - yMean);
+            den += (xs[i] - xMean) ** 2;
+        }
+        const slope = den ? num / den : 0;
+        const intercept = yMean - slope * xMean;
+        return { slope, intercept };
+    },
+
+    // Estimate standard deviation
+    stddev(arr) {
+        if (!arr.length) return 0;
+        const mean = arr.reduce((a, b) => a + b) / arr.length;
+        return Math.sqrt(arr.reduce((s, v) => s + (v - mean) ** 2, 0) / arr.length);
+    },
+
+    // Predict next N cycle lengths using a blend of recency-weighted average and linear trend
+    predictCycleLengths(n = 3) {
+        const cycles = this.cycleLengths();
+        if (!cycles.length) return Array.from({ length: n }, () => 28); // fallback
+
+        // recency weighting (exponential) - use per-user adaptive alpha
+        // Note: weights defined as alpha^(len-1-i) so smaller alpha -> more recency emphasis.
+        const alpha = settings.alpha ?? 0.6;
+
+        const weights = cycles.map((_, i) => Math.pow(alpha, cycles.length - 1 - i));
+        const weightedAvg = this.weightedAverage(cycles, weights);
+
+        const { slope } = this.linearTrend(cycles);
+        const std = this.stddev(cycles);
+
+        const preds = [];
+        for (let i = 1; i <= n; i++) {
+            // Project with trend, but blend with weighted average to reduce overfitting
+            let proj = weightedAvg + slope * i * 0.9;
+            // Regularize and bound to plausible cycle lengths
+            proj = Math.round(Math.max(21, Math.min(40, proj)));
+            // if high variability, shrink toward 28
+            if (std > 3.5) proj = Math.round(proj * 0.6 + 28 * 0.4);
+            preds.push(proj);
+        }
+        return preds;
+    },
+
+    // Predict next N period lengths (days) using recency-weighted average and bounding
+    predictPeriodLength() {
+        const periodsArr = this.periodLengths();
+        if (!periodsArr.length) return 5;
+        const alpha = 0.6;
+        const weights = periodsArr.map((_, i) => Math.pow(alpha, periodsArr.length - 1 - i));
+        let p = this.weightedAverage(periodsArr, weights);
+        p = Math.max(1, Math.min(14, p));
+        return p;
+    },
+
+    // Public averages kept for compatibility; returns conservative estimates
     averages() {
-        const avgPeriodLength = this.average(this.periodLengths(), 5);
-        const avgCycleLength = this.average(this.cycleLengths(), 28);
-        return { 
-            avgPeriodLength, 
-            avgCycleLength, 
-            avgOvulation: avgCycleLength - 14 
+        const avgPeriodLength = this.predictPeriodLength() || 5;
+        const cyclePred = this.predictCycleLengths(1)[0] || 28;
+        const avgCycleLength = Math.round(cyclePred);
+        return {
+            avgPeriodLength,
+            avgCycleLength,
+            avgOvulation: Math.max(1, avgCycleLength - 14)
         };
     },
+
+    // Return best-matching day type for a given date using probabilistic scoring
     getDayType(date) {
         if (!periods.length) return { type: null, info: null };
 
-        const { avgPeriodLength, avgCycleLength } = this.averages();
-
-        // Recorded periods
+        // Use recorded periods first (exact)
         for (let i = 0; i < periods.length; i++) {
             const { start, end } = periods[i];
             const s = new Date(start), e = new Date(end);
@@ -88,25 +169,65 @@ const CycleMath = {
                 return { type: "period", info: `Recorded Period #${i + 1}` };
         }
 
+        // Predict next few cycles with uncertainty-aware logic
         const lastStart = new Date(periods.at(-1).start);
+        const predictedCycles = this.predictCycleLengths(6); // predict further out for robustness
+        const predictedPeriodLen = this.predictPeriodLength();
 
-        for (let c = 1; c <= 3; c++) {
-            const predictedStart = addDays(lastStart, avgCycleLength * c);
-            const predictedEnd = addDays(predictedStart, avgPeriodLength - 1);
-            if (isSameOrAfter(date, predictedStart) && isSameOrBefore(date, predictedEnd))
-                return { type: "predicted", info: `Predicted Period (Cycle +${c})` };
+        // Build probabilistic scores for candidate types
+        const scores = { period: 0, predicted: 0, ovulation: 0, fertile: 0 };
 
-            const ovulationDay = addDays(predictedStart, avgCycleLength - 14);
-            const fertileStart = addDays(ovulationDay, -5);
-            const fertileEnd = addDays(ovulationDay, 1);
-            if (isSameOrAfter(date, fertileStart) && isSameOrBefore(date, fertileEnd))
-                return { 
-                    type: formatDate(date) === formatDate(ovulationDay) ? "ovulation" : "fertile",
-                    info: formatDate(date) === formatDate(ovulationDay)
-                        ? "Predicted Ovulation"
-                        : "Predicted Fertile Window"
-                };
+        let cumInfo = null;
+
+        let cumulativeDays = 0;
+        for (let c = 1; c <= predictedCycles.length; c++) {
+            const cycleLen = predictedCycles[c - 1];
+            const predictedStart = addDays(lastStart, cycleLen * c);
+            const predictedEnd = addDays(predictedStart, predictedPeriodLen - 1);
+
+            // period window scoring (high confidence near center)
+            if (isSameOrAfter(date, addDays(predictedStart, -1)) && isSameOrBefore(date, addDays(predictedEnd, 1))) {
+                // distance from predicted center of period
+                const center = addDays(predictedStart, Math.floor((predictedPeriodLen - 1) / 2));
+                const dist = Math.abs((date - center) / 86400000);
+                // Gaussian-like score
+                const score = Math.max(0, 1 - (dist / Math.max(1.5, predictedPeriodLen / 2)));
+                scores.period = Math.max(scores.period, score);
+                scores.predicted = Math.max(scores.predicted, score);
+                cumInfo = `Predicted Period (Cycle +${c})`;
+            }
+
+            // ovulation/fertile window: estimate ovulation as cycleLen - 14 days after predicted start
+            const ovulationDay = addDays(predictedStart, Math.max(1, cycleLen - 14));
+            const daysFromOv = (date - ovulationDay) / 86400000;
+            if (Math.abs(daysFromOv) <= 5) {
+                // fertile window scoring: peak at ovulation day
+                const score = Math.max(0, 1 - (Math.abs(daysFromOv) / 5));
+                if (Math.abs(daysFromOv) <= 1) { // ovulation or immediate
+                    scores.ovulation = Math.max(scores.ovulation, Math.max(0.6, score));
+                } else {
+                    scores.fertile = Math.max(scores.fertile, score * 0.9);
+                }
+                if (!cumInfo) cumInfo = (formatDate(date) === formatDate(ovulationDay)) ? "Predicted Ovulation" : "Predicted Fertile Window";
+            }
+
+            // small decay so earlier predictions count less
+            cumulativeDays += cycleLen;
         }
+
+        // Decide highest scoring type with thresholds
+        const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+        const [bestType, bestScore] = entries[0];
+
+        // thresholds to avoid false positives
+        if (bestScore < 0.25) return { type: null, info: null };
+
+        if (bestType === "period" || bestType === "predicted") {
+            return { type: "predicted", info: cumInfo ?? "Predicted Period" };
+        }
+        if (bestType === "ovulation") return { type: "ovulation", info: cumInfo ?? "Predicted Ovulation" };
+        if (bestType === "fertile") return { type: "fertile", info: cumInfo ?? "Predicted Fertile Window" };
+
         return { type: null, info: null };
     }
 };
@@ -115,6 +236,58 @@ const CycleMath = {
 function loadData() {
     try { periods = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
     catch { periods = []; }
+}
+
+function loadSettings() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+        if (s && typeof s.alpha === "number") settings = s;
+    } catch {
+        settings = { alpha: 0.6 };
+    }
+}
+
+function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Compute an adaptive alpha (0.25..0.95) based on cycle variability.
+// Lower alpha -> more emphasis on recent (useful when cycles are stable).
+// Higher alpha -> flatter weights (useful when cycles are volatile).
+function computeAdaptiveAlpha() {
+    const cycles = CycleMath.cycleLengths();
+    if (!cycles.length) return settings.alpha ?? 0.6;
+
+    const n = cycles.length;
+    const std = CycleMath.stddev(cycles);
+
+    const MAX_STD = 6;    // std at or above this maps to MAX_ALPHA
+    const MIN_ALPHA = 0.25;
+    const MAX_ALPHA = 0.95;
+    // Map variability to base alpha (0 -> stable -> MIN_ALPHA, 1 -> volatile -> MAX_ALPHA)
+    const t = clamp(std / MAX_STD, 0, 1);
+    const baseAlpha = MIN_ALPHA + t * (MAX_ALPHA - MIN_ALPHA);
+
+    // If we have only a few cycles, be conservative and blend toward a sensible default.
+    // With very few cycles trust is low; with ~10+ cycles trust approaches 1.
+    const defaultAlpha = 0.6;
+    const trust = clamp((n - 2) / 8, 0, 1); // 2 cycles -> 0 trust, 10 cycles -> ~1 trust
+    const blended = defaultAlpha * (1 - trust) + baseAlpha * trust;
+
+    // Round to 2 decimals for stable persistence
+    return Math.round(blended * 100) / 100;
+}
+
+// Update settings.alpha based on current data and persist.
+function adaptAndSaveAlpha() {
+    const newAlpha = computeAdaptiveAlpha();
+    console.log("newAlpha:", newAlpha);
+    if (Math.abs((settings.alpha ?? 0.6) - newAlpha) >= 0.01) {
+        settings.alpha = newAlpha;
+        saveSettings();
+    }
 }
 
 function validateAndSortPeriods() {
@@ -134,6 +307,8 @@ function validateAndSortPeriods() {
 
 function saveData() {
     validateAndSortPeriods();
+    // adjust per-user alpha after validating/saving periods
+    adaptAndSaveAlpha();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(periods));
     updateStats();
 }
@@ -366,7 +541,11 @@ document.getElementById("noClear").onclick = () => {
 document.getElementById("goBackBtn").onclick = () => window.location.href = "../index.html";
 
 // -------------------- Init --------------------
+loadSettings();
 loadData();
+// ensure loaded data is validated/sorted before computing/adapting alpha
+validateAndSortPeriods();
+adaptAndSaveAlpha();
 updateStats();
 const today = new Date();
 currentYear = today.getFullYear();
