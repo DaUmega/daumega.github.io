@@ -18,10 +18,21 @@
 
 	<footer>
 		© <span id="year"></span> DaUmega Free Tools  
-		<div id="donate">
-			<p>💰 Support development — <button id="copyBTC">Copy BTC Address</button></p>
-			<p class="btc-address" id="btcDisplay">bc1qqzf4apnqr39kl695ffnpawmtw7dwhlqpxtpq5t</p>
-		</div>
+    <div id="donate">
+      <p>
+        💰 Support development —
+        <button id="copyBTC" type="button" class="copy-button">
+          Copy BTC Address
+        </button>
+
+        <button id="successMessage" type="button" class="success-message" style="display:none;">
+          Address Copied! ✅
+        </button>
+
+        <span id="copyMessage" class="copy-feedback"></span>
+      </p>
+      <p class="btc-address" id="btcDisplay">bc1qqzf4apnqr39kl695ffnpawmtw7dwhlqpxtpq5t</p>
+      </div>
 	</footer>
 
 	<script src="script.js" defer></script>
