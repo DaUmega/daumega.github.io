@@ -237,7 +237,7 @@ const CycleMath = {
             }
 
             // --- Ovulation and fertile window scoring ---
-            const ovulationDay = addDays(predictedStart, Math.floor(cycleLen / 2));
+            const ovulationDay = addDays(predictedStart, Math.max(1, cycleLen - 14));
             const daysFromOv = (date - ovulationDay) / 86400000;
 
             if (daysFromOv >= -6 && daysFromOv <= 1) {
