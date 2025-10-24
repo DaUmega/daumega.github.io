@@ -129,7 +129,7 @@ const CycleMath = {
     },
 
     // Predict next N cycle lengths using a blend of recency-weighted average and linear trend
-    predictCycleLengths(n = 3) {
+    predictCycleLengths(n = 4) {
         const cycles = this.cycleLengths();
         if (!cycles.length) return Array.from({ length: n }, () => 28); // fallback
 
