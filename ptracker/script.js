@@ -18,10 +18,32 @@ const statsEl = document.getElementById("stats");
 const messageEl = document.getElementById("message");
 
 // -------------------- Helpers --------------------
-const formatDate = date => date.toISOString().split("T")[0];
-const addDays = (date, days) => new Date(date.getTime() + days * 86400000);
+// formatDate -> use LOCAL date components (avoids UTC shift)
+const pad = n => String(n).padStart(2, "0");
+const formatDate = date =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+// addDays -> do local-date arithmetic (safer across DST/timezones)
+const addDays = (date, days) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+
+// keep isSameOrBefore / isSameOrAfter as-is (they use formatDate now consistently)
 const isSameOrBefore = (d1, d2) => formatDate(d1) <= formatDate(d2);
 const isSameOrAfter = (d1, d2) => formatDate(d1) >= formatDate(d2);
+
+function atMidnight(d) {
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    return x;
+}
+
+function parseLocalDate(iso) {
+  if (!iso) return new Date(NaN);
+  const parts = String(iso).split("-");
+  if (parts.length !== 3) return new Date(iso); // fallback for other formats
+  const [y, m, d] = parts.map(Number);
+  return new Date(y, m - 1, d);
+}
 
 const showMessage = text => {
     messageEl.textContent = text;
@@ -53,8 +75,8 @@ const CycleMath = {
     // Return array of recorded period lengths in days
     periodLengths() {
         return periods.map(p => {
-            const start = new Date(p.start);
-            const end = new Date(p.end);
+            const start = parseLocalDate(p.start);
+            const end = parseLocalDate(p.end);
             return Math.ceil((end - start) / 86400000) + 1;
         });
     },
@@ -63,7 +85,7 @@ const CycleMath = {
     cycleLengths() {
         const cycles = [];
         for (let i = 1; i < periods.length; i++) {
-            const diff = new Date(periods[i].start) - new Date(periods[i - 1].start);
+            const diff = parseLocalDate(periods[i].start) - parseLocalDate(periods[i - 1].start);
             cycles.push(Math.ceil(diff / 86400000));
         }
         return cycles;
@@ -164,63 +186,79 @@ const CycleMath = {
         // Use recorded periods first (exact)
         for (let i = 0; i < periods.length; i++) {
             const { start, end } = periods[i];
-            const s = new Date(start), e = new Date(end);
+            const s = parseLocalDate(start), e = parseLocalDate(end);
             if (isSameOrAfter(date, s) && isSameOrBefore(date, e))
                 return { type: "period", info: `Recorded Period #${i + 1}` };
         }
 
-        // Predict next few cycles with uncertainty-aware logic
-        const lastStart = new Date(periods.at(-1).start);
-        const predictedCycles = this.predictCycleLengths(6); // predict further out for robustness
+        // Predict future cycles
+        const lastStart = parseLocalDate(periods.at(-1).start);
+        const predictedCycles = this.predictCycleLengths(4); // next 4 cycles
         const predictedPeriodLen = this.predictPeriodLength();
 
-        // Build probabilistic scores for candidate types
+        // Initialize scores
         const scores = { period: 0, predicted: 0, ovulation: 0, fertile: 0 };
-
         let cumInfo = null;
 
-        let cumulativeDays = 0;
         for (let c = 1; c <= predictedCycles.length; c++) {
             const cycleLen = predictedCycles[c - 1];
             const predictedStart = addDays(lastStart, cycleLen * c);
             const predictedEnd = addDays(predictedStart, predictedPeriodLen - 1);
 
-            // period window scoring (high confidence near center)
-            if (isSameOrAfter(date, addDays(predictedStart, -1)) && isSameOrBefore(date, addDays(predictedEnd, 1))) {
-                // distance from predicted center of period
-                const center = addDays(predictedStart, Math.floor((predictedPeriodLen - 1) / 2));
-                const dist = Math.abs((date - center) / 86400000);
-                // Gaussian-like score
-                const score = Math.max(0, 1 - (dist / Math.max(1.5, predictedPeriodLen / 2)));
+            // --- Predicted period scoring ---
+            // keep your smoothing window of start-1 .. end+1 if you want soft edges,
+            // or change to predictedStart .. predictedEnd to only score strict period days.
+            const windowStart = addDays(predictedStart, -1);
+            const windowEnd = addDays(predictedEnd, 1);
+
+            if (isSameOrAfter(date, windowStart) && isSameOrBefore(date, windowEnd)) {
+                // normalize to midnights to avoid fractional-day artifacts
+                const normDate = atMidnight(date);
+                const normStart = atMidnight(predictedStart);
+
+                // days since start (can be negative or fractional if times differ)
+                const daysSinceStart = (normDate - normStart) / 86400000;
+
+                // use fractional center so even-length periods are centered correctly
+                const centerOffset = (predictedPeriodLen - 1) / 2; // e.g. for 4 -> 1.5
+
+                const dist = Math.abs(daysSinceStart - centerOffset);
+
+                // denominator: how quickly the bell decays; predictedPeriodLen/2 keeps edges > 0
+                const denom = Math.max(1, predictedPeriodLen / 2);
+
+                const score = Math.max(0, 1 - (dist / denom));
+
+                console.log("daysSinceStart:", daysSinceStart, "centerOffset:", centerOffset, "dist:", dist, "score:", score.toFixed(3));
+
                 scores.period = Math.max(scores.period, score);
                 scores.predicted = Math.max(scores.predicted, score);
                 cumInfo = `Predicted Period (Cycle +${c})`;
             }
 
-            // ovulation/fertile window: estimate ovulation as cycleLen - 14 days after predicted start
-            const ovulationDay = addDays(predictedStart, Math.max(1, cycleLen - 14));
+            // --- Ovulation and fertile window scoring ---
+            const ovulationDay = addDays(predictedStart, Math.floor(cycleLen / 2));
             const daysFromOv = (date - ovulationDay) / 86400000;
-            if (Math.abs(daysFromOv) <= 5) {
-                // fertile window scoring: peak at ovulation day
-                const score = Math.max(0, 1 - (Math.abs(daysFromOv) / 5));
-                if (Math.abs(daysFromOv) <= 1) { // ovulation or immediate
-                    scores.ovulation = Math.max(scores.ovulation, Math.max(0.6, score));
-                } else {
-                    scores.fertile = Math.max(scores.fertile, score * 0.9);
-                }
-                if (!cumInfo) cumInfo = (formatDate(date) === formatDate(ovulationDay)) ? "Predicted Ovulation" : "Predicted Fertile Window";
-            }
 
-            // small decay so earlier predictions count less
-            cumulativeDays += cycleLen;
+            if (daysFromOv >= -6 && daysFromOv <= 1) {
+                if (Math.round(daysFromOv) === 0) {
+                    scores.ovulation = Math.max(scores.ovulation, 1);
+                    cumInfo = "Predicted Ovulation";
+                } else {
+                    // Linear scoring for fertile days
+                    const score = daysFromOv < 0 ? 1 + daysFromOv / 6 : 0.5; // Optional: lower score after ovulation
+                    scores.fertile = Math.max(scores.fertile, score * 0.9);
+                    if (!cumInfo) cumInfo = "Predicted Fertile Window";
+                }
+            }
         }
 
-        // Decide highest scoring type with thresholds
+        // --- Pick best type ---
         const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
         const [bestType, bestScore] = entries[0];
 
-        // thresholds to avoid false positives
-        if (bestScore < 0.25) return { type: null, info: null };
+        // Threshold to avoid false positives
+        if (bestScore < 0.1) return { type: null, info: null };
 
         if (bestType === "period" || bestType === "predicted") {
             return { type: "predicted", info: cumInfo ?? "Predicted Period" };
@@ -292,7 +330,7 @@ function adaptAndSaveAlpha() {
 
 function validateAndSortPeriods() {
     periods = periods
-        .map(p => ({ start: new Date(p.start), end: new Date(p.end) }))
+        .map(p => ({ start: parseLocalDate(p.start), end: parseLocalDate(p.end) }))
         .filter(p => !isNaN(p.start) && !isNaN(p.end) && p.start <= p.end)
         .map(p => ({
             start: formatDate(p.start),
@@ -314,12 +352,12 @@ function saveData() {
 }
 
 function isValidPeriod(startStr, endStr, skipIndex = -1) {
-    const start = new Date(startStr), end = new Date(endStr);
+    const start = parseLocalDate(startStr), end = parseLocalDate(endStr);
     if (isNaN(start) || isNaN(end) || start > end) return false;
     const duration = Math.ceil((end - start) / 86400000) + 1;
     if (duration < 1 || duration > 14) return false;
     return periods.every((p, i) => 
-        i === skipIndex || end < new Date(p.start) || start > new Date(p.end)
+        i === skipIndex || end < parseLocalDate(p.start) || start > parseLocalDate(p.end)
     );
 }
 
@@ -415,8 +453,8 @@ function showPopup(date, type, info) {
         } else showPopupError("Invalid end date for this period.");
     });
 
-    const idx = periods.findIndex(p => 
-        isSameOrAfter(date, new Date(p.start)) && isSameOrBefore(date, new Date(p.end))
+    const idx = periods.findIndex(p =>
+        isSameOrAfter(date, parseLocalDate(p.start)) && isSameOrBefore(date, parseLocalDate(p.end))
     );
     if (idx !== -1) addEditDeleteButtons(idx);
 
