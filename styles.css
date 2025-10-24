@@ -133,6 +133,23 @@ footer {
 	word-break: break-all;
 }
 
+.success-message {
+  background-color: #28a745; /* Green */
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  pointer-events: none; /* Prevents button interaction after success */
+  font-weight: bold;
+  cursor: default;
+}
+
+.copy-feedback {
+  margin-left: 10px;
+  font-weight: bold;
+  font-size: 0.9em;
+}
+
 /* ====== Mobile / Small Screens ====== */
 @media (max-width: 1080px) {
 	main {
