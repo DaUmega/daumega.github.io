@@ -198,59 +198,54 @@ const CycleMath = {
 
         // Initialize scores
         const scores = { period: 0, predicted: 0, ovulation: 0, fertile: 0 };
-        let cumInfo = null;
+        let dayInfo = null;
 
-        for (let c = 1; c <= predictedCycles.length; c++) {
-            const cycleLen = predictedCycles[c - 1];
-            const predictedStart = addDays(lastStart, cycleLen * c);
+        // We'll iterate advancing from the last known start (prevStart),
+        // so each cycle uses its own length and the correct previous-start anchor.
+        let prevStart = lastStart;
+
+        for (let c = 0; c < predictedCycles.length; c++) {
+            const cycleLen = predictedCycles[c];               // this cycle's length
+            const predictedStart = addDays(prevStart, cycleLen); // next period start
             const predictedEnd = addDays(predictedStart, predictedPeriodLen - 1);
 
-            // --- Predicted period scoring ---
-            // keep your smoothing window of start-1 .. end+1 if you want soft edges,
-            // or change to predictedStart .. predictedEnd to only score strict period days.
+            // --- Predicted period scoring (soft window around predicted period) ---
             const windowStart = addDays(predictedStart, -1);
             const windowEnd = addDays(predictedEnd, 1);
 
             if (isSameOrAfter(date, windowStart) && isSameOrBefore(date, windowEnd)) {
-                // normalize to midnights to avoid fractional-day artifacts
                 const normDate = atMidnight(date);
                 const normStart = atMidnight(predictedStart);
-
-                // days since start (can be negative or fractional if times differ)
                 const daysSinceStart = (normDate - normStart) / 86400000;
-
-                // use fractional center so even-length periods are centered correctly
-                const centerOffset = (predictedPeriodLen - 1) / 2; // e.g. for 4 -> 1.5
-
+                const centerOffset = (predictedPeriodLen - 1) / 2;
                 const dist = Math.abs(daysSinceStart - centerOffset);
-
-                // denominator: how quickly the bell decays; predictedPeriodLen/2 keeps edges > 0
                 const denom = Math.max(1, predictedPeriodLen / 2);
-
                 const score = Math.max(0, 1 - (dist / denom));
-
-                console.log("daysSinceStart:", daysSinceStart, "centerOffset:", centerOffset, "dist:", dist, "score:", score.toFixed(3));
-
                 scores.period = Math.max(scores.period, score);
                 scores.predicted = Math.max(scores.predicted, score);
-                cumInfo = `Predicted Period (Cycle +${c})`;
+                dayInfo = `Predicted Period (Cycle +${c + 1})`;
             }
 
             // --- Ovulation and fertile window scoring ---
-            const ovulationDay = addDays(predictedStart, Math.max(1, cycleLen - 14));
+            // Ovulation for *this* predicted cycle happens relative to the cycle's start (prevStart):
+            // ovulation ≈ prevStart + (cycleLen - 14)  (bounded to at least day 1)
+            const ovulationDay = addDays(prevStart, Math.max(1, cycleLen - 14));
             const daysFromOv = (date - ovulationDay) / 86400000;
 
             if (daysFromOv >= -6 && daysFromOv <= 1) {
                 if (Math.round(daysFromOv) === 0) {
                     scores.ovulation = Math.max(scores.ovulation, 1);
-                    cumInfo = "Predicted Ovulation";
+                    dayInfo = "Predicted Ovulation";
                 } else {
-                    // Linear scoring for fertile days
-                    const score = daysFromOv < 0 ? 1 + daysFromOv / 6 : 0.5; // Optional: lower score after ovulation
+                    // Linear scoring for fertile days (better before ovulation)
+                    const score = daysFromOv < 0 ? 1 + daysFromOv / 6 : 0.5;
                     scores.fertile = Math.max(scores.fertile, score * 0.9);
-                    if (!cumInfo) cumInfo = "Predicted Fertile Window";
+                    if (!dayInfo) dayInfo = "Predicted Fertile Window";
                 }
             }
+
+            // advance prevStart to this predicted period start for next iteration
+            prevStart = predictedStart;
         }
 
         // --- Pick best type ---
@@ -261,10 +256,10 @@ const CycleMath = {
         if (bestScore < 0.15) return { type: null, info: null };
 
         if (bestType === "period" || bestType === "predicted") {
-            return { type: "predicted", info: cumInfo ?? "Predicted Period" };
+            return { type: "predicted", info: dayInfo ?? "Predicted Period" };
         }
-        if (bestType === "ovulation") return { type: "ovulation", info: cumInfo ?? "Predicted Ovulation" };
-        if (bestType === "fertile") return { type: "fertile", info: cumInfo ?? "Predicted Fertile Window" };
+        if (bestType === "ovulation") return { type: "ovulation", info: dayInfo ?? "Predicted Ovulation" };
+        if (bestType === "fertile") return { type: "fertile", info: dayInfo ?? "Predicted Fertile Window" };
 
         return { type: null, info: null };
     }
