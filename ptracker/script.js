@@ -253,7 +253,7 @@ const CycleMath = {
         const [bestType, bestScore] = entries[0];
 
         // Threshold to avoid false positives
-        if (bestScore < 0.15) return { type: null, info: null };
+        if (bestScore < 0.1) return { type: null, info: null };
 
         if (bestType === "period" || bestType === "predicted") {
             return { type: "predicted", info: dayInfo ?? "Predicted Period" };
