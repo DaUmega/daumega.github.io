@@ -49,15 +49,19 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
 		const rawFactor = 1 + ((breakStat - defenseStat) * 0.001);
 		const clampedFactor = Math.max(0.5, Math.min(1.5, rawFactor));
 
-		// damage modifier from aerial: (1 + attacker's extra%) * (1 - defender's reduction%)
-		const aerialFactor = (1 + attacker.extraAerial / 100) * (1 - defender.reduceAerial / 100);
-		// damage modifier from player-targeted bonuses
-		const playerFactor = (1 + attacker.extraPlayer / 100) * (1 - defender.reducePlayer / 100);
+		// Net % = attacker's bonus - defender's reduction
+		const aerialNet = attacker.extraAerial - defender.reduceAerial;
+		const playerNet = attacker.extraPlayer - defender.reducePlayer;
 
-		// ensure factors can't be negative (in case reductions >100%)
+		// Convert to multiplier: e.g., +20% → 1.2, -20% → 0.8
+		const aerialFactor = 1 + (aerialNet / 100);
+		const playerFactor = 1 + (playerNet / 100);
+
+		// Prevent negative multipliers
 		const safeAerial = Math.max(0, aerialFactor);
 		const safePlayer = Math.max(0, playerFactor);
 
+		// Combine all multipliers
 		const totalMultiplier = safeAerial * safePlayer;
 
 		return attacker.power * clampedFactor * totalMultiplier;
