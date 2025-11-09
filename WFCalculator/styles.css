@@ -1,0 +1,177 @@
+/* Page basics */
+* { box-sizing: border-box; }
+
+body {
+	font-family: Arial, sans-serif;
+	max-width: 980px;
+	margin: 32px auto;
+	padding: 20px;
+	background: #fbfcff;
+	color: #222;
+	font-size: 18px;
+	line-height: 1.5;
+}
+
+h1 {
+	text-align: center;
+	font-size: 34px;
+	margin-bottom: 20px;
+}
+
+.notice {
+	font-size: 15px;
+	color: #555;
+	margin-bottom: 14px;
+	padding: 12px;
+	background: #fff9e6;
+	border: 1px solid #f0e6bf;
+	border-radius: 8px;
+}
+
+.form-container {
+	background: #f4fbff;
+	padding: 18px;
+	border-radius: 10px;
+	border: 1px solid #d6eefc;
+	margin-bottom: 18px;
+}
+
+/* Headings: two columns (player, enemy) */
+.grid-headings {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	align-items: center;
+	margin-bottom: 10px;
+	gap: 10px;
+}
+
+.player-title, .enemy-title {
+	text-align: center;
+	font-weight: 700;
+	padding: 6px 8px;
+	background: #ffffff;
+	border-radius: 8px;
+	border: 1px solid #e2f3ff;
+}
+
+/* The form grid stacks stat rows vertically */
+.form-grid {
+	display: grid;
+	gap: 12px;
+}
+
+/* Each stat-row has two equal columns for the inputs.
+   The label spans both columns above the inputs so label length won't affect input spacing.
+*/
+.stat-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr; /* player | enemy */
+	grid-auto-rows: auto;
+	column-gap: 12px;   /* horizontal gap between player/enemy inputs */
+	row-gap: 6px;       /* vertical gap between label and inputs and between rows */
+	align-items: center;
+	padding: 4px 0;
+}
+
+/* label spans full width above the two inputs */
+.stat-row .stat-title {
+	grid-column: 1 / -1;
+	justify-self: center;
+	font-weight: 700;
+	font-size: 15px;
+	padding: 2px 6px;
+	margin: 0;
+}
+
+/* left and right controls (inputs/selects) */
+.stat-row .player-input {
+	grid-column: 1;
+	width: 100%;
+	padding: 10px;
+	font-size: 16px;
+	border: 1px solid #cbdfea;
+	border-radius: 8px;
+	background: #fff;
+}
+
+.stat-row .enemy-input {
+	grid-column: 2;
+	width: 100%;
+	padding: 10px;
+	font-size: 16px;
+	border: 1px solid #cbdfea;
+	border-radius: 8px;
+	background: #fff;
+}
+
+/* Make selects look consistent */
+.stat-row select.player-input,
+.stat-row select.enemy-input {
+	appearance: none;
+}
+
+/* Button styling */
+button {
+	margin-top: 14px;
+	padding: 12px 18px;
+	font-size: 18px;
+	border: none;
+	cursor: pointer;
+	background: #2e8b57;
+	color: white;
+	border-radius: 10px;
+	transition: background 0.15s;
+	display: inline-block;
+}
+button:hover { background: #277a4a; }
+
+.note {
+	margin-top: 12px;
+	color: #444;
+}
+
+.results-container {
+	background: #e8fbf2;
+	padding: 16px;
+	border-radius: 8px;
+	border: 1px solid #cfeedd;
+	font-size: 17px;
+	margin-top: 8px;
+}
+
+.results-container h3 {
+	margin-top: 0;
+	font-size: 22px;
+}
+
+strong {
+	color: #1a6a50;
+}
+
+#goBackBtn {
+	padding: 10px 16px;
+	font-size: 16px;
+	background: #ff7f50;
+	color: white;
+	border: none;
+	border-radius: 8px;
+	cursor: pointer;
+	margin: 16px auto 40px;
+	display: block;
+	transition: background 0.15s ease, transform 0.06s ease;
+}
+#goBackBtn:hover { background: #ff6347; transform: scale(1.02); }
+
+/* Small screens: keep two columns but tighten spacing.
+   (You asked for two columns on mobile too.)
+*/
+@media (max-width: 480px) {
+	body { padding: 12px; }
+	.grid-headings { gap: 8px; }
+	.player-title, .enemy-title { font-size: 14px; padding: 6px; }
+	.stat-row { column-gap: 8px; row-gap: 6px; }
+	.stat-row .stat-title { font-size: 14px; }
+	.player-input, .enemy-input { padding: 8px; font-size: 15px; }
+	/* make action button full width on tiny screens */
+	button { width: 100%; }
+}

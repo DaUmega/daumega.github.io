@@ -14,6 +14,11 @@ const tools = [
 		name: "PeerLive",
 		desc: "Peer-to-peer encrypted live camera app with real-time chat and customizable display names.",
 		link: "https://peerlive.duckdns.org"
+	},
+	{
+		name: "Wing Fighter PVP Power Calculator",
+		desc: "Estimate your chance of victory in PvP battles in the mobile game Wing Fighter, using simplified formulas.",
+		link: "WFCalculator/index.html"
 	}
 ];
 
