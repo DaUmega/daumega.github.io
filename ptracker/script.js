@@ -580,6 +580,9 @@ document.getElementById("goBackBtn").onclick = () => window.location.href = "../
     const SESSION_INIT = "dmInitialized", SESSION_USER_TOGGLED = "dmUserToggled";
     let applyTimer = 0, observer = null;
 
+    // USER CONFIG: array of CSS selectors or elements that dark mode should ignore
+    const EXCLUDE_ELEMENTS = [".period"];
+
     // insert stylesheet once
     if (!document.getElementById(STYLE_ID)) {
         const s = document.createElement("style");
@@ -607,11 +610,19 @@ document.getElementById("goBackBtn").onclick = () => window.location.href = "../
     }
     const brightness = rgb => rgb ? (rgb[0]*299 + rgb[1]*587 + rgb[2]*114)/1000 : 255;
 
+    function isExcluded(el) {
+        if (!EXCLUDE_ELEMENTS || !EXCLUDE_ELEMENTS.length) return false;
+        return EXCLUDE_ELEMENTS.some(sel => {
+            if (typeof sel === "string") return el.matches(sel);
+            return el === sel;
+        });
+    }
+
     function applyDark() {
         clearTimeout(applyTimer);
         applyTimer = setTimeout(() => requestAnimationFrame(() => {
             document.querySelectorAll("body *").forEach(el => {
-                if (el.dataset.dmProcessed) return;
+                if (el.dataset.dmProcessed || isExcluded(el)) return;
                 try {
                     el.dataset.dmOriginalStyle = el.getAttribute("style") || "";
                     const cs = getComputedStyle(el), bg = cs.backgroundColor || "", fs = parseFloat(cs.fontSize || 0);
@@ -661,7 +672,6 @@ document.getElementById("goBackBtn").onclick = () => window.location.href = "../
                     sessionStorage.setItem(SESSION_USER_TOGGLED, "1");
                     localStorage.setItem(STORAGE_KEY, enabled ? "true" : "false");
                     if (enabled) {
-                        // one-time transition on first toggle
                         BODY.classList.add("dm-transition");
                         applyDark();
                         startObserver();
