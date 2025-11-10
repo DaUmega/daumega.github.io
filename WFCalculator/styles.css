@@ -172,6 +172,4 @@ strong {
 	.stat-row { column-gap: 8px; row-gap: 6px; }
 	.stat-row .stat-title { font-size: 14px; }
 	.player-input, .enemy-input { padding: 8px; font-size: 15px; }
-	/* make action button full width on tiny screens */
-	button { width: 100%; }
 }
