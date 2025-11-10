@@ -94,10 +94,10 @@ h1 {
 .day:hover { background: #f5f5f5; }
 
 .today { border: 2px solid #000; }
-.period { background: #ffb3ba; }
-.fertile { background: #baffc9; }
-.ovulation { background: #bae1ff; font-weight: bold; }
-.predicted { background: #dab6fc; }
+.period { background: #ff9aa4; }
+.fertile { background: #00be29; }
+.ovulation { background: #00811c; font-weight: bold; }
+.predicted { background: #ff00ff; }
 
 .day span {
 	position: absolute;
