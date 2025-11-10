@@ -256,9 +256,9 @@ document.getElementById("goBackBtn").addEventListener("click", () => {
 
     // Load preference
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "true" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-        body.classList.add("dark-mode"); toggle.textContent="☀️"; applyDark();
-    }
+    body.classList.toggle("dark-mode", saved === "true");
+	toggle.textContent = saved === "true" ? "☀️" : "🌙";
+	if (saved === "true") applyDark();
 
     const brightness = rgb => (rgb[0]*299 + rgb[1]*587 + rgb[2]*114)/1000;
 
