@@ -93,7 +93,7 @@ h1 {
 }
 .day:hover { background: #f5f5f5; }
 
-.today { border: 2px solid #000; }
+.today { border: 2px solid #0f2ee0; }
 .period { background: #ff9aa4; }
 .fertile { background: #00be29; }
 .ovulation { background: #00811c; font-weight: bold; }
