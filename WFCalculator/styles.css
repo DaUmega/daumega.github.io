@@ -162,9 +162,39 @@ strong {
 }
 #goBackBtn:hover { background: #ff6347; transform: scale(1.02); }
 
-/* Small screens: keep two columns but tighten spacing.
-   (You asked for two columns on mobile too.)
-*/
+.optional-section {
+	margin-top: 18px;
+	margin-bottom: 10px;
+	text-align: center;
+}
+
+#toggleOptionalBtn {
+	background: #3b82f6;
+	font-size: 17px;
+	padding: 10px 16px;
+	border-radius: 8px;
+	color: white;
+	border: none;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+#toggleOptionalBtn:hover {
+	background: #2563eb;
+}
+
+.optional-fields {
+	margin-top: 12px;
+	background: #f0f8ff;
+	padding: 12px;
+	border: 1px solid #cde2f7;
+	border-radius: 10px;
+	animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn {
+	from { opacity: 0; transform: translateY(-5px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
 @media (max-width: 480px) {
 	body { padding: 12px; }
 	.grid-headings { gap: 8px; }

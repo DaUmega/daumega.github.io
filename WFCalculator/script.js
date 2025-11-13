@@ -1,7 +1,10 @@
+const toggleBtn = document.getElementById("toggleOptionalBtn");
+const optionalFields = document.getElementById("optionalFields");
+
 document.getElementById("calculateBtn").addEventListener("click", () => {
 	// --- Read helper to parse numeric inputs safely ---
 	function num(id, def = 0) {
-		const v = parseFloat(document.getElementById(id).value);
+		const v = parseFloat(document.getElementById(id)?.value);
 		return (isNaN(v) ? def : v);
 	}
 
@@ -17,6 +20,11 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
 		reduceAerial: num("playerReduceAerial", 0),
 		extraPlayer: num("playerExtraPlayer", 0),
 		reducePlayer: num("playerReducePlayer", 0),
+
+		// Optional weapon-specific attacks
+		MGAttack: num("playerMGAttack", 0),
+		WGAttack: num("playerWGAttack", 0),
+		MSLAttack: num("playerMSLAttack", 0),
 	};
 
 	// --- Gather enemy inputs ---
@@ -31,6 +39,11 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
 		reduceAerial: num("enemyReduceAerial", 0),
 		extraPlayer: num("enemyExtraPlayer", 0),
 		reducePlayer: num("enemyReducePlayer", 0),
+
+		// Optional weapon-specific attacks
+		MGAttack: num("enemyMGAttack", 0),
+		WGAttack: num("enemyWGAttack", 0),
+		MSLAttack: num("enemyMSLAttack", 0),
 	};
 
 	// Basic validation
@@ -41,57 +54,97 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
 
 	// Calculation function
 	function effectivePower(attacker, defender) {
-		// choose break vs defense by attacker's weapon type
 		const breakStat = (attacker.weaponType === "physical") ? attacker.physBreak : attacker.energyBreak;
 		const defenseStat = (attacker.weaponType === "physical") ? defender.physDef : defender.energyDef;
 
-		// break vs defense factor (1 + diff * 0.001), clamped
 		const rawFactor = 1 + ((breakStat - defenseStat) * 0.001);
 		const clampedFactor = Math.max(0.5, Math.min(1.5, rawFactor));
 
-		// Net % = attacker's bonus - defender's reduction
 		const aerialNet = attacker.extraAerial - defender.reduceAerial;
 		const playerNet = attacker.extraPlayer - defender.reducePlayer;
 
-		// Convert to multiplier: e.g., +20% → 1.2, -20% → 0.8
 		const aerialFactor = 1 + (aerialNet / 100);
 		const playerFactor = 1 + (playerNet / 100);
 
-		// Prevent negative multipliers
 		const safeAerial = Math.max(0, aerialFactor);
 		const safePlayer = Math.max(0, playerFactor);
 
-		// Combine all multipliers
 		const totalMultiplier = safeAerial * safePlayer;
-
-		return attacker.power * clampedFactor * totalMultiplier;
+		return { clampedFactor, totalMultiplier };
 	}
 
-	const playerEffective = effectivePower(player, enemy);
-	const enemyEffective = effectivePower(enemy, player);
+	// --- Calculate effective multipliers ---
+	const playerFactors = effectivePower(player, enemy);
+	const enemyFactors = effectivePower(enemy, player);
 
-	// Win probability: logistic around ratio=1 (same shape you had)
+	// --- Apply same scaling to Power and the optional attack stats ---
+	function scaleStats(entity, factors) {
+		return {
+			effectivePower: entity.power * factors.clampedFactor * factors.totalMultiplier,
+			effectiveMG: entity.MGAttack * factors.clampedFactor * factors.totalMultiplier,
+			effectiveWG: entity.WGAttack * factors.clampedFactor * factors.totalMultiplier,
+			effectiveMSL: entity.MSLAttack * factors.clampedFactor * factors.totalMultiplier,
+		};
+	}
+
+	const playerScaled = scaleStats(player, playerFactors);
+	const enemyScaled = scaleStats(enemy, enemyFactors);
+
+	// --- Win chance (same as before) ---
 	let winChance;
-	if (enemyEffective <= 0 && playerEffective <= 0) {
+	if (enemyScaled.effectivePower <= 0 && playerScaled.effectivePower <= 0) {
 		winChance = 50;
-	} else if (enemyEffective <= 0) {
+	} else if (enemyScaled.effectivePower <= 0) {
 		winChance = 100;
 	} else {
-		const ratio = playerEffective / enemyEffective;
-        const steepness = 10; // tweak for desired curve
+		const ratio = playerScaled.effectivePower / enemyScaled.effectivePower;
+		const steepness = 10;
 		winChance = Math.round(100 / (1 + Math.exp(-steepness * (ratio - 1))));
-		// clamp 0-100
 		winChance = Math.max(0, Math.min(100, winChance));
 	}
 
-	// Output
-	document.getElementById("playerEffectivePower").textContent = playerEffective.toFixed(2);
-	document.getElementById("enemyEffectivePower").textContent = enemyEffective.toFixed(2);
+	// --- Output results ---
+	document.getElementById("playerEffectivePower").textContent = playerScaled.effectivePower.toFixed(2);
+	document.getElementById("enemyEffectivePower").textContent = enemyScaled.effectivePower.toFixed(2);
+
+	// Create or update comparison lines for MG/WG/MSL if applicable
+	function setStatLine(id, label, playerVal, enemyVal) {
+		if (playerVal > 0 || enemyVal > 0) {
+			let elem = document.getElementById(id);
+			if (!elem) {
+				const ul = document.querySelector("#results ul");
+				elem = document.createElement("li");
+				elem.id = id;
+				ul.appendChild(elem);
+			}
+			elem.innerHTML = `<strong>${label}:</strong> Player ${playerVal.toFixed(2)} vs Enemy ${enemyVal.toFixed(2)}`;
+		} else {
+			// Remove the line if it exists but both values are 0
+			const elem = document.getElementById(id);
+			if (elem) elem.remove();
+		}
+	}
+
+	setStatLine("mgCompare", "Main Gun Effective Attack", playerScaled.effectiveMG, enemyScaled.effectiveMG);
+	setStatLine("wgCompare", "Wing Gun Effective Attack", playerScaled.effectiveWG, enemyScaled.effectiveWG);
+	setStatLine("mslCompare", "Missile Effective Attack", playerScaled.effectiveMSL, enemyScaled.effectiveMSL);
+
 	document.getElementById("winChance").textContent = `${winChance}%`;
 	document.getElementById("results").style.display = "block";
 });
 
 document.getElementById("goBackBtn").addEventListener("click", () => {
-	// keep same behavior as before
 	window.location.href = "../index.html";
+});
+
+// Toggle Optional Stats section
+toggleBtn.addEventListener("click", () => {
+	const isVisible = optionalFields.style.display === "block";
+	if (isVisible) {
+		optionalFields.style.display = "none";
+		toggleBtn.textContent = "⚙️ Show Optional Stats";
+	} else {
+		optionalFields.style.display = "block";
+		toggleBtn.textContent = "⚙️ Hide Optional Stats";
+	}
 });
