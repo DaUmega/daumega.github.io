@@ -16,7 +16,7 @@ const tools = [
 		link: "https://peerlive.duckdns.org"
 	},
 	{
-		name: "WF PVP Power Calculator",
+		name: "WF PVP Calculator",
 		desc: "Estimate your chance of victory in PvP battles in the mobile game Wing Fighter, using simplified formulas.",
 		link: "WFCalculator/index.html"
 	}
