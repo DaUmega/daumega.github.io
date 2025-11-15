@@ -12,7 +12,7 @@ const tools = [
 	},
 	{
 		name: "PeerLive",
-		desc: "Peer-to-peer encrypted live camera app with real-time chat and customizable display names.",
+		desc: "Like a crappy Twitch, but more secure with peer-to-peer traffic, and no data saved anywhere.",
 		link: "https://peerlive.duckdns.org"
 	},
 	{
