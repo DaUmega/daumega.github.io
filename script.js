@@ -12,7 +12,7 @@ const tools = [
 	},
 	{
 		name: "PeerLive",
-		desc: "Like a crappy Twitch, but more secure with peer-to-peer traffic, and no data saved anywhere.",
+		desc: "Like a crappy Twitch, but more secure with encrypted peer-to-peer traffic, and no data saved anywhere.",
 		link: "https://peerlive.duckdns.org"
 	},
 	{
