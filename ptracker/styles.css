@@ -1,11 +1,11 @@
-/* ====== Base (Desktop) ====== */
+/* ====== Base (Desktop) Dark Mode ====== */
 body {
 	font-family: Arial, sans-serif;
 	max-width: 900px;
 	margin: 40px auto;
 	padding: 20px;
-	background: #fefefe;
-	color: #333;
+	background: #121212;
+	color: #e0e0e0;
 	font-size: 18px;
 	line-height: 1.6;
 }
@@ -14,25 +14,27 @@ h1 {
 	text-align: center;
 	font-size: 40px;
 	margin-bottom: 30px;
+	color: #ffffff;
 }
 
 .notice {
 	font-size: 16px;
-	color: #555;
+	color: #ccc;
 	margin-bottom: 20px;
 	padding: 12px;
-	background: #f9f9f9;
-	border: 1px solid #ddd;
+	background: #1e1e1e;
+	border: 1px solid #333;
 	border-radius: 8px;
 }
 
 #stats {
-	background: #f0f8ff;
+	background: #1a1a2e;
 	padding: 16px;
 	border-radius: 8px;
-	border: 1px solid #ccc;
+	border: 1px solid #444;
 	margin-bottom: 20px;
 	font-size: 17px;
+	color: #cfd8dc;
 }
 
 .calendar-container {
@@ -46,6 +48,7 @@ h1 {
 	font-weight: bold;
 	margin-bottom: 6px;
 	font-size: 18px;
+	color: #bbbbbb;
 }
 
 .calendar-header {
@@ -57,6 +60,7 @@ h1 {
 	justify-content: center;
 	align-items: center;
 	gap: 20px;
+	color: #ffffff;
 }
 
 .nav-btn {
@@ -64,13 +68,14 @@ h1 {
 	background: none;
 	border: none;
 	cursor: pointer;
-	color: #0f2ee0;
+	color: #61dafb;
 }
-.nav-btn:hover { color: #0891e0; }
+.nav-btn:hover { color: #21a1f1; }
 
 .month-label {
 	font-weight: bold;
 	font-size: 28px;
+	color: #ffffff;
 }
 
 .calendar {
@@ -80,7 +85,7 @@ h1 {
 }
 
 .day {
-	border: 1px solid #ddd;
+	border: 1px solid #333;
 	padding: 14px;
 	min-height: 80px;
 	cursor: pointer;
@@ -90,14 +95,16 @@ h1 {
 	display: flex;
 	align-items: flex-start;
 	justify-content: flex-end;
+	background: #1e1e1e;
+	color: #e0e0e0;
 }
-.day:hover { background: #f5f5f5; }
+.day:hover { background: #2a2a2a; }
 
-.today { border: 2px solid #0f2ee0; }
-.period { background: #ff9aa4; }
-.fertile { background: #00be29; }
-.ovulation { background: #00811c; font-weight: bold; }
-.predicted { background: #ff00ff; }
+.today { border: 2px solid #61dafb; }
+.period { background: #ff6b81; }
+.fertile { background: #28a745; }
+.ovulation { background: #198754; font-weight: bold; }
+.predicted { background: #c163c1; }
 
 .day span {
 	position: absolute;
@@ -105,6 +112,7 @@ h1 {
 	left: 50%;
 	transform: translate(-50%, -50%);
 	font-size: 26px;
+	color: #ffffff;
 }
 
 /* ====== Actions buttons (bottom bar style) ====== */
@@ -136,20 +144,22 @@ h1 {
 	position: fixed;
 	top: 50%; left: 50%;
 	transform: translate(-50%, -50%);
-	background: white;
+	background: #1e1e1e;
 	padding: 20px;
-	border: 1px solid #ccc;
+	border: 1px solid #444;
 	border-radius: 10px;
-	box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+	box-shadow: 0 6px 16px rgba(0,0,0,0.7);
 	z-index: 1000;
 	display: none;
 	max-width: 400px;
 	font-size: 20px;
 	text-align: center;
+	color: #e0e0e0;
 }
 .popup h3 {
 	margin-top: 0;
 	font-size: 24px;
+	color: #ffffff;
 }
 .popup button {
 	margin: 8px 0;
@@ -159,8 +169,8 @@ h1 {
 	border: none;
 	cursor: pointer;
 	font-size: clamp(14px, 2vw, 18px);
-	background: linear-gradient(135deg, #bae1ff, #89c2f0);
-	color: #023e8a;
+	background: linear-gradient(135deg, #3a3a3a, #5a5a5a);
+	color: #ffffff;
 	font-weight: bold;
 	white-space: nowrap;
 	text-overflow: ellipsis;
@@ -168,14 +178,14 @@ h1 {
 	transition: background 0.2s, transform 0.1s;
 }
 .popup button:hover {
-	background: linear-gradient(135deg, #89c2f0, #0077b6);
+	background: linear-gradient(135deg, #5a5a5a, #7a7a7a);
 	transform: scale(1.03);
 }
 
 .overlay {
 	position: fixed;
 	top:0; left:0; right:0; bottom:0;
-	background: rgba(0,0,0,0.4);
+	background: rgba(0,0,0,0.7);
 	display: none;
 	z-index: 999;
 }
@@ -188,11 +198,10 @@ h1 {
 	border: none;
 	border-radius: 8px;
 	cursor: pointer;
-	margin: 20px auto 40px; /* space above and below */
-	display: block; /* center it */
+	margin: 20px auto 40px;
+	display: block;
 	transition: background 0.2s ease, transform 0.1s ease;
 }
-
 #goBackBtn:hover {
 	background: #ff6347;
 	transform: scale(1.03);
@@ -208,15 +217,15 @@ h1 {
 }
 
 .message.success {
-	background: #d4edda;
-	color: #155724;
-	border: 1px solid #c3e6cb;
+	background: #155724;
+	color: #d4edda;
+	border: 1px solid #28a745;
 }
 
 .message.error {
-	background: #f8d7da;
-	color: #721c24;
-	border: 1px solid #f5c6cb;
+	background: #721c24;
+	color: #f8d7da;
+	border: 1px solid #c82333;
 }
 
 /* ====== Confirmation Box ====== */
@@ -224,16 +233,15 @@ h1 {
 	display: none;
 	margin-top: 10px;
 	padding: 12px;
-	background: #fff3cd;
-	border: 1px solid #ffeeba;
+	background: #3a3a3a;
+	border: 1px solid #555;
 	border-radius: 8px;
-	color: #856404;
+	color: #e0e0e0;
 	font-size: 16px;
 	text-align: center;
 }
-.confirm-box p {
-	margin: 0 0 10px;
-}
+.confirm-box p { margin: 0 0 10px; }
+
 .confirm-actions {
 	display: flex;
 	justify-content: center;
@@ -246,32 +254,32 @@ h1 {
 	cursor: pointer;
 	font-size: 15px;
 }
-.confirm-actions button:hover {
-	opacity: 0.9;
-}
-.confirm-actions .danger {
-	background: #b20000;
-	color: #fff;
-}
-.confirm-actions button:not(.danger) {
-	background: #e2e3e5;
-	color: #333;
-}
+.confirm-actions button:hover { opacity: 0.9; }
+.confirm-actions .danger { background: #b20000; color: #fff; }
+.confirm-actions button:not(.danger) { background: #555; color: #e0e0e0; }
+
 #editForm input[type="date"] {
 	font-size: 1.2em;
 	padding: 10px;
 	min-height: 48px;
 	width: 100%;
 	box-sizing: border-box;
+	background: #2a2a2a;
+	color: #e0e0e0;
+	border: 1px solid #555;
 }
 #editForm button#saveEdit {
 	font-size: 1.1em;
 	padding: 12px;
 	width: 100%;
 	margin-top: 8px;
+	background: #4CAF50;
+	color: white;
+	border-radius: 8px;
+	border: none;
 }
 
-/* ====== Mobile (<= 1080px) ====== */
+/* ====== Mobile (<= 1080px) Dark Mode ====== */
 @media (max-width: 1080px) {
 	body {
 		max-width: 100%;
@@ -280,65 +288,39 @@ h1 {
 		font-size: 16px;
 	}
 
-	h1 {
-		font-size: 32px;
-		margin-bottom: 20px;
-	}
+	h1 { font-size: 32px; margin-bottom: 20px; }
 
-	.notice {
-		font-size: 15px;
-		padding: 12px;
-		margin-bottom: 18px;
-	}
+	.notice { font-size: 15px; padding: 12px; margin-bottom: 18px; }
 
-	#stats {
-		font-size: 15px;
-		padding: 14px;
-		margin-bottom: 18px;
-	}
+	#stats { font-size: 15px; padding: 14px; margin-bottom: 18px; }
 
-	.weekdays {
-		font-size: 16px;
-	}
+	.weekdays { font-size: 16px; }
 
-	.calendar-header {
-		font-size: 32px;
-		gap: 14px;
-		margin-bottom: 18px;
-	}
+	.calendar-header { font-size: 32px; gap: 14px; margin-bottom: 18px; }
 	.nav-btn { font-size: 34px; }
 	.month-label { font-size: 32px; }
 
-	.calendar {
-		gap: 5px;
-	}
+	.calendar { gap: 5px; }
 
 	.day {
 		min-height: 30px;
 		font-size: 20px;
 		padding: 10px;
+		background: #1e1e1e;
+		color: #e0e0e0;
 	}
-	.day span { font-size: 20px; }
+	.day span { font-size: 20px; color: #fff; }
 
-	.actions button {
-		font-size: clamp(14px, 4vw, 18px);
-		padding: 10px;
-		border-radius: 10;
-	}
+	.actions button { font-size: clamp(14px, 4vw, 18px); padding: 10px; border-radius: 10; }
 
 	.popup {
 		max-width: 95%;
 		padding: 18px;
 		font-size: 14px;
 		border-radius: 12px;
+		background: #1e1e1e;
+		color: #e0e0e0;
 	}
-	.popup h3 {
-		font-size: 18px;
-		margin-bottom: 14px;
-	}
-	.popup button {
-		font-size: clamp(14px, 4vw, 16px);
-		padding: 10px;
-		margin: 10px 0;
-	}
+	.popup h3 { font-size: 18px; margin-bottom: 14px; }
+	.popup button { font-size: clamp(14px, 4vw, 16px); padding: 10px; margin: 10px 0; }
 }
