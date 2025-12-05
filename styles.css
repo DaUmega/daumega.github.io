@@ -1,8 +1,8 @@
 :root {
-	--bg: #f9f9f9;
-	--card-bg: #fff;
-	--accent: #3824e9;
-	--text: #333;
+	--bg: #121212;
+	--card-bg: #171a21;
+	--accent: #6c7cff;
+	--text: #e6e8ec;
 }
 
 /* ====== Base Styles ====== */
@@ -31,6 +31,7 @@ header h1 {
 header p {
 	margin: 0.5rem 0 0;
 	font-size: clamp(0.9rem, 3vw, 1.2rem);
+	color: #b9bfd0;
 }
 
 /* ====== Main Grid ====== */
@@ -46,7 +47,7 @@ main {
 	background: var(--card-bg);
 	border-radius: 12px;
 	padding: 1.5rem;
-	box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+	box-shadow: 0 4px 12px rgba(0,0,0,0.45);
 	display: flex;
 	flex-direction: column;
 	justify-content: space-between;
@@ -57,7 +58,7 @@ main {
 
 .card:hover {
 	transform: translateY(-3px);
-	box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+	box-shadow: 0 8px 18px rgba(0,0,0,0.6);
 }
 
 .card h2 {
@@ -71,6 +72,7 @@ main {
 	margin: 0.5rem 0 1rem;
 	font-size: clamp(0.9rem, 2.5vw, 1rem);
 	line-height: 1.4;
+	color: #d2d6e0;
 }
 
 .card button {
@@ -81,7 +83,7 @@ main {
 	border: none;
 	border-radius: 6px;
 	background: var(--accent);
-	color: #fff;
+	color: #ffffff;
 	cursor: pointer;
 	transition: background 0.2s ease, transform 0.1s ease;
 	white-space: nowrap;
@@ -90,7 +92,7 @@ main {
 }
 
 .card button:hover {
-	background: #2a19b0;
+	background: #555ff0;
 	transform: scale(1.03);
 }
 
@@ -99,7 +101,7 @@ footer {
 	text-align: center;
 	padding: 1rem;
 	font-size: clamp(0.8rem, 2.5vw, 0.95rem);
-	color: #777;
+	color: #9aa0ad;
 }
 
 #donate {
@@ -112,7 +114,7 @@ footer {
 
 #copyBTC {
 	background: #ffb100;
-	color: #222;
+	color: #1a1a1a;
 	border: none;
 	padding: 0.4rem 0.8rem;
 	border-radius: 5px;
@@ -127,18 +129,18 @@ footer {
 
 .btc-address {
 	font-family: monospace;
-	color: #555;
+	color: #a2a8b6;
 	font-size: 0.85rem;
 	word-break: break-all;
 }
 
 .success-message {
-  background-color: #28a745; /* Green */
+  background-color: #2ea043;
   color: white;
   border: none;
   padding: 8px 12px;
   border-radius: 4px;
-  pointer-events: none; /* Prevents button interaction after success */
+  pointer-events: none;
   font-weight: bold;
   cursor: default;
 }
@@ -147,10 +149,11 @@ footer {
   margin-left: 10px;
   font-weight: bold;
   font-size: 0.9em;
+  color: #6c7cff;
 }
 
 /* ====== Mobile / Small Screens ====== */
-@media (max-width: 1080px) {
+@media (max-width: 768px) {
 	main {
 		padding: 1rem;
 		gap: 0.8rem;
