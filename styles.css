@@ -152,6 +152,11 @@ footer {
   color: #6c7cff;
 }
 
+a, a:visited {
+	color: var(--text);
+	text-decoration: underline;
+}
+
 /* ====== Mobile / Small Screens ====== */
 @media (max-width: 768px) {
 	main {
