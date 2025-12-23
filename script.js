@@ -1,6 +1,11 @@
 // Tool definitions, add more tools here
 const tools = [
 	{
+		name: "QR Code Generator",
+		desc: "Easily Generate QR Code for anything and download, no ads, no bloat, and all frontend!",
+		link: "qrMaker/index.html"
+	},
+	{
 		name: "Period Tracker",
 		desc: "Track your cycle and export/import data securely, all stored locally on your device.",
 		link: "ptracker/index.html"
@@ -19,11 +24,6 @@ const tools = [
 		name: "WF PVP Calculator",
 		desc: "Estimate your chance of victory in PvP battles in the mobile game Wing Fighter, using simplified formulas.",
 		link: "WFCalculator/index.html"
-	},
-	{
-		name: "QR Code Generator",
-		desc: "Easily Generate QR Code for anything and download, no ads, no bloat, and all frontend!",
-		link: "qrMaker/index.html"
 	}
 ];
 
