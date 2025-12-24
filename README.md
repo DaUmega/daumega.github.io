@@ -20,7 +20,7 @@ This repository hosts a variety of independent tools, including (but not limited
 - Calculators and planners  
 - Data visualization utilities  
 - Privacy-focused personal tools  
-- Experimental peer-to-peer web apps  
+- Peer-to-peer web apps  
 - Game-related utilities  
 - Frontend-only demos and prototypes  
 
