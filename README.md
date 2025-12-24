@@ -3,7 +3,6 @@
 This repository contains a growing collection of small, privacy-friendly web apps and utilities I’ve built.
 
 All tools are:
-- **100% client-side** (run entirely in your browser)
 - **Free and open source**
 - **No accounts, no ads, no tracking**
 - **No data collection**
