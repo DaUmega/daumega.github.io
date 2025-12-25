@@ -261,9 +261,9 @@ class QrCode {
 
 QrCode.MIN_VERSION = 1; QrCode.MAX_VERSION = 40; QrCode.PENALTY_N1 = 3; QrCode.PENALTY_N2 = 3; QrCode.PENALTY_N3 = 40; QrCode.PENALTY_N4 = 10;
 QrCode.ECC_CODEWORDS_PER_BLOCK = [
-	[-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+	[-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30],
 	[-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],
-	[-1,13,22,18,26,18,24,18,22,20,24,28,26,24,20,30,24,28,28,26,30,28,30,30,30,30,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+	[-1,13,22,18,26,18,24,18,22,20,24,28,26,24,20,30,24,28,28,26,30,28,30,30,30,30,28,30,30,30,30,30,30,30,30,30,30,30,30,30],
 	[-1,17,28,22,16,22,28,26,26,24,28,24,28,22,24,24,30,28,28,26,28,30,24,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30]
 ];
 QrCode.NUM_ERROR_CORRECTION_BLOCKS = [
@@ -303,9 +303,9 @@ class Mode { constructor(modeBits, numBitsCharCount) { this.modeBits = modeBits;
 Mode.NUMERIC = new Mode(0x1, [10,12,14]); Mode.ALPHANUMERIC = new Mode(0x2, [9,11,13]); Mode.BYTE = new Mode(0x4, [8,16,16]); Mode.KANJI = new Mode(0x8, [8,10,12]); Mode.ECI = new Mode(0x7, [0,0,0]);
 qrcodegen.QrSegment.Mode = Mode;
 
-/* ---------- Minimal UI (global scope, concise) ---------- */
+/* ---------- Minimal UI ---------- */
 const INP_ID = 'qrInput', CANVAS_ID = 'qrCanvas', RESULT_ID = 'result', DOWNLOAD_ID = 'downloadBtn';
-const BORDER = 4, MIN_CSS = 256, MAX_MODULE_PX = 16, DEBOUNCE = 100;
+const BORDER = 4, MIN_CSS = 256, MIN_MODULE_PX = 4, MAX_MODULE_PX = 64, DEBOUNCE = 100;
 
 const inp = document.getElementById(INP_ID);
 const canvas = document.getElementById(CANVAS_ID);
@@ -332,18 +332,21 @@ if (inp && canvas && resultDiv && downloadBtn) {
 		if (!qr) { paintError('Too long'); return; }
 
 		const device = window.devicePixelRatio || 1;
-		let modulePx = Math.floor(Math.max(MIN_CSS, canvas.clientWidth || MIN_CSS) / (qr.size + BORDER * 2));
-		modulePx = Math.max(1, Math.min(MAX_MODULE_PX, modulePx));
+		const containerWidth = canvas.clientWidth || MIN_CSS;
+		let modulePx = Math.floor(containerWidth / (qr.size + BORDER * 2));
+		modulePx = Math.max(MIN_MODULE_PX, Math.min(MAX_MODULE_PX, modulePx));
 		let cssSize = (qr.size + BORDER * 2) * modulePx;
-		if (cssSize < MIN_CSS) { modulePx = Math.ceil(MIN_CSS / (qr.size + BORDER * 2)); cssSize = (qr.size + BORDER * 2) * modulePx; }
+		if (cssSize < MIN_CSS) {
+			modulePx = Math.ceil(MIN_CSS / (qr.size + BORDER * 2));
+			modulePx = Math.max(MIN_MODULE_PX, Math.min(MAX_MODULE_PX, modulePx));
+			cssSize = (qr.size + BORDER * 2) * modulePx;
+		}
 
 		canvas.style.width = cssSize + 'px'; canvas.style.height = cssSize + 'px'; canvas.width = Math.round(cssSize * device); canvas.height = Math.round(cssSize * device);
 		ctx.setTransform(device, 0, 0, device, 0, 0);
-
 		ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, cssSize, cssSize);
 		ctx.fillStyle = '#000000';
 		for (let y = 0; y < qr.size; y++) for (let x = 0; x < qr.size; x++) if (qr.getModule(x, y)) { const px = (x + BORDER) * modulePx; const py = (y + BORDER) * modulePx; ctx.fillRect(Math.round(px), Math.round(py), Math.round(modulePx), Math.round(modulePx)); }
-
 		resultDiv.style.display = 'block'; downloadBtn.style.display = 'inline-block';
 	}
 
