@@ -1,45 +1,55 @@
 # DaUmega Tools
 
-This repository contains small, privacy-friendly web apps and utilities I’ve built.  
-All tools are open source, free to use, and run directly in your browser with no tracking, no ads, and no data collection.
-Desktop and mobile friendly.
+This repository contains a growing collection of small, privacy-friendly web apps and utilities I’ve built.
 
-🌐 Live site: [https://daumega.github.io/](https://daumega.github.io/)
+All tools are:
+- **Free and open source**
+- **No accounts, no ads, no tracking**
+- **No data collection**
+- **Desktop and mobile friendly**
 
----
-
-## Available Tools
-
-### 🌸 Period Tracker
-A lightweight, private period tracking app.
-
-- 100% free, open-source, and ad-free  
-- No accounts or logins required  
-- All data is stored **locally on your device**  
-- Uses intelligent math to **predict future cycles and ovulation** based on your personal history  
-
-👉 Try it here: [https://daumega.github.io/ptracker/index.html](https://daumega.github.io/ptracker/index.html)
+🌐 Live site: https://daumega.github.io/
 
 ---
 
-### 💸 Loan Calculator
-A simple, client-side loan and amortization calculator.
+## Tools
 
-- Calculates **regular payments**, total interest, and payoff schedule  
-- Supports **monthly, bi-weekly, weekly, or daily payments**  
-- Supports **extra payments** to see interest savings and faster payoff  
-- Generates an **interactive chart** of principal vs interest per payment  
-- **Download your full amortization schedule as CSV** for Excel or Google Sheets  
+This repository hosts a variety of independent tools, including (but not limited to):
 
-👉 Try it here: [https://daumega.github.io/loanCalculator/index.html](https://daumega.github.io/loanCalculator/index.html)
+- Calculators and planners  
+- Data visualization utilities  
+- Privacy-focused personal tools  
+- Peer-to-peer web apps  
+- Game-related utilities  
+- Frontend-only demos and prototypes  
+
+New tools may be added, improved, or retired over time.
+
+For the most up-to-date list, browse the repository folders or visit the live site.
+
+---
+
+## Philosophy
+
+These tools are intentionally:
+- Minimal
+- Fast
+- Easy to understand
+- Easy to self-host or fork
+
+Most projects favor simplicity over features and avoid unnecessary dependencies.
 
 ---
 
 ## Contributing
-Contributions and feedback are welcome!  
-Feel free to open an issue or submit a pull request.
+
+Contributions, suggestions, and bug reports are welcome.
+
+- Open an issue for feedback or ideas  
+- Submit a pull request for fixes or improvements  
 
 ---
 
 ## License
-[MIT](LICENSE)
+
+MIT License
