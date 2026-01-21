@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>⚔️ Wing Fighter PvP Calculator</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<h1>⚔️ Wing Fighter PvP Calculator</h1>
+
+	<div class="notice">
+		⚠️ This calculator provides estimates based on simplified formulas. Use it for general guidance only.
+	</div>
+
+	<div class="form-container">
+		<div class="grid-headings">
+			<div class="player-title">🛩️ Player</div>
+			<div class="enemy-title">👾 Enemy</div>
+		</div>
+
+		<div class="form-grid">
+			<!-- Weapon Type -->
+			<div class="stat-row">
+				<div class="stat-title">Weapon Type</div>
+				<select class="player-input" id="playerWeaponType">
+					<option value="physical">Physical</option>
+					<option value="energy">Energy</option>
+				</select>
+				<select class="enemy-input" id="enemyWeaponType">
+					<option value="physical">Physical</option>
+					<option value="energy">Energy</option>
+				</select>
+			</div>
+
+			<!-- Power -->
+			<div class="stat-row">
+				<div class="stat-title">Power (P)</div>
+				<input class="player-input" type="number" id="playerPower" placeholder="e.g. 1000000" />
+				<input class="enemy-input" type="number" id="enemyPower" placeholder="e.g. 1000000" />
+			</div>
+
+			<!-- Physical Defense Break -->
+			<div class="stat-row">
+				<div class="stat-title">Physical Defense Break (PDB)</div>
+				<input class="player-input" type="number" id="playerPhysBreak" placeholder="e.g. 1000" />
+				<input class="enemy-input" type="number" id="enemyPhysBreak" placeholder="e.g. 1000" />
+			</div>
+
+			<!-- Physical Defense -->
+			<div class="stat-row">
+				<div class="stat-title">Physical Defense (PD)</div>
+				<input class="player-input" type="number" id="playerPhysDef" placeholder="e.g. 1000" />
+				<input class="enemy-input" type="number" id="enemyPhysDef" placeholder="e.g. 1000" />
+			</div>
+
+			<!-- Energy Defense Break -->
+			<div class="stat-row">
+				<div class="stat-title">Energy Defense Break (EDB)</div>
+				<input class="player-input" type="number" id="playerEnergyBreak" placeholder="e.g. 1000" />
+				<input class="enemy-input" type="number" id="enemyEnergyBreak" placeholder="e.g. 1000" />
+			</div>
+
+			<!-- Energy Defense -->
+			<div class="stat-row">
+				<div class="stat-title">Energy Defense (ED)</div>
+				<input class="player-input" type="number" id="playerEnergyDef" placeholder="e.g. 1000" />
+				<input class="enemy-input" type="number" id="enemyEnergyDef" placeholder="e.g. 1000" />
+			</div>
+
+			<!-- Extra Damage vs Aerial -->
+			<div class="stat-row">
+				<div class="stat-title">Extra Damage vs Aerial (%)</div>
+				<input class="player-input" type="number" id="playerExtraAerial" placeholder="e.g. 50" />
+				<input class="enemy-input" type="number" id="enemyExtraAerial" placeholder="e.g. 50" />
+			</div>
+
+			<!-- Damage Reduction vs Aerial -->
+			<div class="stat-row">
+				<div class="stat-title">Damage Reduction vs Aerial (%)</div>
+				<input class="player-input" type="number" id="playerReduceAerial" placeholder="e.g. 50" />
+				<input class="enemy-input" type="number" id="enemyReduceAerial" placeholder="e.g. 50" />
+			</div>
+
+			<!-- Extra Damage vs Players -->
+			<div class="stat-row">
+				<div class="stat-title">Extra Damage vs Players (%)</div>
+				<input class="player-input" type="number" id="playerExtraPlayer" placeholder="e.g. 30" />
+				<input class="enemy-input" type="number" id="enemyExtraPlayer" placeholder="e.g. 30" />
+			</div>
+
+			<!-- Damage Reduction vs Players -->
+			<div class="stat-row">
+				<div class="stat-title">Damage Reduction vs Players (%)</div>
+				<input class="player-input" type="number" id="playerReducePlayer" placeholder="e.g. 30" />
+				<input class="enemy-input" type="number" id="enemyReducePlayer" placeholder="e.g. 30" />
+			</div>
+		</div>
+
+		<!-- Optional Stats Toggle -->
+		<div class="optional-section">
+			<button id="toggleOptionalBtn" type="button">⚙️ Show Optional Stats</button>
+
+			<div id="optionalFields" class="optional-fields" style="display: none;">
+				<div class="stat-row">
+					<div class="stat-title">Maingun Attack</div>
+					<input class="player-input" type="number" id="playerMGAttack" placeholder="e.g. 100000" />
+					<input class="enemy-input" type="number" id="enemyMGAttack" placeholder="e.g. 100000" />
+				</div>
+
+				<div class="stat-row">
+					<div class="stat-title">Winggun Attack</div>
+					<input class="player-input" type="number" id="playerWGAttack" placeholder="e.g. 100000" />
+					<input class="enemy-input" type="number" id="enemyWGAttack" placeholder="e.g. 100000" />
+				</div>
+
+				<div class="stat-row">
+					<div class="stat-title">Missile Attack</div>
+					<input class="player-input" type="number" id="playerMSLAttack" placeholder="e.g. 100000" />
+					<input class="enemy-input" type="number" id="enemyMSLAttack" placeholder="e.g. 100000" />
+				</div>
+
+				<p class="note"><small>These are optional, more may be added in future versions.</small></p>
+			</div>
+		</div>
+
+		<button id="calculateBtn">Calculate</button>
+
+		<p class="note">
+			<small>This calculator uses estimated, simplified formulas, and does not factor in drones, if your opponent has high Drone PVP stats like Cheating Death, adjust your estimates accordingly.</small>
+		</p>
+	</div>
+
+	<div id="results" class="results-container" style="display:none;">
+		<h3>📊 Results</h3>
+		<ul>
+			<li><strong>Player Effective Power:</strong> <span id="playerEffectivePower">0</span></li>
+			<li><strong>Enemy Effective Power:</strong> <span id="enemyEffectivePower">0</span></li>
+			<li><strong>Estimated Win Probability (player):</strong> <span id="winChance">0%</span></li>
+		</ul>
+	</div>
+
+	<button id="goBackBtn">← Go Back</button>
+
+	<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+/* Page basics */
+* { box-sizing: border-box; }
+
+body {
+	font-family: Arial, sans-serif;
+	max-width: 980px;
+	margin: 32px auto;
+	padding: 20px;
+	background: #121212;
+	color: #e6e9ee;
+	font-size: 18px;
+	line-height: 1.5;
+}
+
+h1 {
+	text-align: center;
+	font-size: 34px;
+	margin-bottom: 20px;
+	color: #8ab4ff;
+}
+
+.notice {
+	font-size: 15px;
+	color: #e8dca8;
+	margin-bottom: 14px;
+	padding: 12px;
+	background: #2a2416;
+	border: 1px solid #4a4022;
+	border-radius: 8px;
+}
+
+.form-container {
+	background: #151b23;
+	padding: 18px;
+	border-radius: 10px;
+	border: 1px solid #263241;
+	margin-bottom: 18px;
+}
+
+/* Headings: two columns (player, enemy) */
+.grid-headings {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	align-items: center;
+	margin-bottom: 10px;
+	gap: 10px;
+}
+
+.player-title, .enemy-title {
+	text-align: center;
+	font-weight: 700;
+	padding: 6px 8px;
+	background: #1c2532;
+	border-radius: 8px;
+	border: 1px solid #30445c;
+	color: #d6e6ff;
+}
+
+/* The form grid stacks stat rows vertically */
+.form-grid {
+	display: grid;
+	gap: 12px;
+}
+
+/* Each stat-row has two equal columns for the inputs */
+.stat-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	grid-auto-rows: auto;
+	column-gap: 12px;
+	row-gap: 6px;
+	align-items: center;
+	padding: 4px 0;
+}
+
+/* label spans full width above the two inputs */
+.stat-row .stat-title {
+	grid-column: 1 / -1;
+	justify-self: center;
+	font-weight: 700;
+	font-size: 15px;
+	padding: 2px 6px;
+	margin: 0;
+	color: #9ecbff;
+}
+
+/* left and right controls */
+.stat-row .player-input {
+	grid-column: 1;
+	width: 100%;
+	padding: 10px;
+	font-size: 16px;
+	border: 1px solid #3a4a5a;
+	border-radius: 8px;
+	background: #11161d;
+	color: #e6e9ee;
+}
+
+.stat-row .enemy-input {
+	grid-column: 2;
+	width: 100%;
+	padding: 10px;
+	font-size: 16px;
+	border: 1px solid #3a4a5a;
+	border-radius: 8px;
+	background: #11161d;
+	color: #e6e9ee;
+}
+
+/* Make selects look consistent */
+.stat-row select.player-input,
+.stat-row select.enemy-input {
+	appearance: none;
+}
+
+/* Button styling */
+button {
+	margin-top: 14px;
+	padding: 12px 18px;
+	font-size: 18px;
+	border: none;
+	cursor: pointer;
+	background: #2ea043;
+	color: white;
+	border-radius: 10px;
+	transition: background 0.15s;
+	display: inline-block;
+}
+button:hover { background: #25903b; }
+
+.note {
+	margin-top: 12px;
+	color: #b8c0cc;
+}
+
+.results-container {
+	background: #132a20;
+	padding: 16px;
+	border-radius: 8px;
+	border: 1px solid #1f4d3a;
+	font-size: 17px;
+	margin-top: 8px;
+	color: #dcf5eb;
+}
+
+.results-container h3 {
+	margin-top: 0;
+	font-size: 22px;
+	color: #6ce3b4;
+}
+
+strong {
+	color: #6ce3b4;
+}
+
+#goBackBtn {
+	padding: 10px 16px;
+	font-size: 16px;
+	background: #ff7f50;
+	color: white;
+	border: none;
+	border-radius: 8px;
+	cursor: pointer;
+	margin: 16px auto 40px;
+	display: block;
+	transition: background 0.15s ease, transform 0.06s ease;
+}
+#goBackBtn:hover {
+	background: #ff6347;
+	transform: scale(1.02);
+}
+
+.optional-section {
+	margin-top: 18px;
+	margin-bottom: 10px;
+	text-align: center;
+}
+
+#toggleOptionalBtn {
+	background: #3b82f6;
+	font-size: 17px;
+	padding: 10px 16px;
+	border-radius: 8px;
+	color: white;
+	border: none;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+#toggleOptionalBtn:hover {
+	background: #2563eb;
+}
+
+.optional-fields {
+	margin-top: 12px;
+	background: #111a24;
+	padding: 12px;
+	border: 1px solid #263a52;
+	border-radius: 10px;
+	animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+	from { opacity: 0; transform: translateY(-5px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+	body { padding: 12px; }
+	.grid-headings { gap: 8px; }
+	.player-title, .enemy-title { font-size: 14px; padding: 6px; }
+	.stat-row { column-gap: 8px; row-gap: 6px; }
+	.stat-row .stat-title { font-size: 14px; }
+	.player-input, .enemy-input { padding: 8px; font-size: 15px; }
+}

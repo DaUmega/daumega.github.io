@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>🔳 QR Code Generator</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<h1>🔳 QR Code Generator</h1>
+
+	<div class="notice">
+		⚠️ No data is sent anywhere. This tool runs entirely in your browser.
+	</div>
+
+	<div class="form-container">
+		<label>
+			Text / URL:
+			<input type="text" id="qrInput" placeholder="e.g. https://example.com" />
+		</label>
+	</div>
+
+	<div id="result" class="results-container" style="display:none;">
+		<canvas id="qrCanvas" width="256" height="256"></canvas>
+	</div>
+
+	<button id="downloadBtn" style="display:none;">💾 Download PNG</button>
+	<button id="goBackBtn">← Go Back</button>
+
+	<script src="script.js"></script>
+</body>
+</html>

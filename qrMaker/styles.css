@@ -1,0 +1,98 @@
+body {
+	font-family: Arial, sans-serif;
+	max-width: 700px;
+	margin: 40px auto;
+	padding: 20px;
+	background: #121212;
+	color: #e6e9ee;
+	font-size: 18px;
+	line-height: 1.6;
+}
+
+h1 {
+	text-align: center;
+	font-size: 34px;
+	margin-bottom: 30px;
+	color: #8ab4ff;
+}
+
+.notice {
+	font-size: 16px;
+	color: #b8c0cc;
+	margin-bottom: 20px;
+	padding: 12px;
+	background: #1a1f27;
+	border: 1px solid #2a3442;
+	border-radius: 8px;
+}
+
+.form-container {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	background: #151b23;
+	padding: 20px;
+	border-radius: 8px;
+	border: 1px solid #303c4d;
+	margin-bottom: 20px;
+}
+
+label {
+	display: flex;
+	flex-direction: column;
+	font-weight: bold;
+	font-size: 16px;
+	color: #d6deea;
+}
+
+input {
+	padding: 10px;
+	font-size: 18px;
+	border: 1px solid #3a4a5a;
+	border-radius: 6px;
+	margin-top: 4px;
+	background: #11161d;
+	color: #e6e9ee;
+}
+
+button {
+	padding: 14px;
+	font-size: 18px;
+	border: none;
+	cursor: pointer;
+	background: #2ea043;
+	color: white;
+	border-radius: 10px;
+}
+
+button:hover {
+	background: #25903b;
+}
+
+.results-container {
+	background: #132a20;
+	padding: 20px;
+	border-radius: 8px;
+	border: 1px solid #1f4d3a;
+	text-align: center;
+}
+
+canvas {
+	margin-top: 15px;
+	background: #fff;
+	padding: 10px;
+	border-radius: 6px;
+}
+
+#downloadBtn {
+	margin: 20px auto;
+	display: block;
+	background: #8ab4ff;
+	color: #000;
+}
+
+#goBackBtn {
+	margin: 30px auto 0;
+	display: block;
+	background: #ff7f50;
+}

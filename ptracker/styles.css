@@ -1,0 +1,326 @@
+/* ====== Base (Desktop) Dark Mode ====== */
+body {
+	font-family: Arial, sans-serif;
+	max-width: 900px;
+	margin: 40px auto;
+	padding: 20px;
+	background: #121212;
+	color: #e0e0e0;
+	font-size: 18px;
+	line-height: 1.6;
+}
+
+h1 {
+	text-align: center;
+	font-size: 40px;
+	margin-bottom: 30px;
+	color: #ffffff;
+}
+
+.notice {
+	font-size: 16px;
+	color: #ccc;
+	margin-bottom: 20px;
+	padding: 12px;
+	background: #1e1e1e;
+	border: 1px solid #333;
+	border-radius: 8px;
+}
+
+#stats {
+	background: #1a1a2e;
+	padding: 16px;
+	border-radius: 8px;
+	border: 1px solid #444;
+	margin-top: 20px;
+	margin-bottom: 20px;
+	font-size: 17px;
+	color: #cfd8dc;
+}
+
+.calendar-container {
+	margin-top: 20px;
+}
+
+.weekdays {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	text-align: center;
+	font-weight: bold;
+	margin-bottom: 6px;
+	font-size: 18px;
+	color: #bbbbbb;
+}
+
+.calendar-header {
+	grid-column: span 7;
+	text-align: center;
+	margin-bottom: 20px;
+	font-size: 28px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 20px;
+	color: #ffffff;
+}
+
+.nav-btn {
+	font-size: 28px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: #61dafb;
+}
+.nav-btn:hover { color: #21a1f1; }
+
+.month-label {
+	font-weight: bold;
+	font-size: 28px;
+	color: #ffffff;
+}
+
+.calendar {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 6px;
+}
+
+.day {
+	border: 1px solid #333;
+	padding: 14px;
+	min-height: 80px;
+	cursor: pointer;
+	position: relative;
+	border-radius: 8px;
+	font-size: 16px;
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-end;
+	background: #1e1e1e;
+	color: #e0e0e0;
+}
+.day:hover { background: #2a2a2a; }
+
+.today { border: 2px solid #61dafb; }
+.period { background: #ff6b81; }
+.fertile { background: #28a745; }
+.ovulation { background: #198754; font-weight: bold; }
+.predicted { background: #c163c1; }
+
+.day span {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 26px;
+	color: #ffffff;
+}
+
+/* ====== Actions buttons (bottom bar style) ====== */
+.actions {
+	margin-top: 20px;
+	display: flex;
+	gap: 10px;
+}
+
+.actions button {
+	flex: 1;
+	box-sizing: border-box;
+	white-space: nowrap;     
+	text-overflow: ellipsis;
+	overflow: hidden;
+	padding: 1em;
+	cursor: pointer;
+	border: none;
+	background: #4CAF50;
+	color: white;
+	border-radius: 10px;
+	transition: background 0.2s;
+	font-size: clamp(14px, 2vw, 20px);
+}
+.actions button:hover { background: #45a049; }
+
+/* ====== Popup ====== */
+.popup {
+	position: fixed;
+	top: 50%; left: 50%;
+	transform: translate(-50%, -50%);
+	background: #1e1e1e;
+	padding: 20px;
+	border: 1px solid #444;
+	border-radius: 10px;
+	box-shadow: 0 6px 16px rgba(0,0,0,0.7);
+	z-index: 1000;
+	display: none;
+	max-width: 400px;
+	font-size: 20px;
+	text-align: center;
+	color: #e0e0e0;
+}
+.popup h3 {
+	margin-top: 0;
+	font-size: 24px;
+	color: #ffffff;
+}
+.popup button {
+	margin: 8px 0;
+	width: 100%;
+	padding: 12px;
+	border-radius: 8px;
+	border: none;
+	cursor: pointer;
+	font-size: clamp(14px, 2vw, 18px);
+	background: linear-gradient(135deg, #3a3a3a, #5a5a5a);
+	color: #ffffff;
+	font-weight: bold;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	transition: background 0.2s, transform 0.1s;
+}
+.popup button:hover {
+	background: linear-gradient(135deg, #5a5a5a, #7a7a7a);
+	transform: scale(1.03);
+}
+
+.overlay {
+	position: fixed;
+	top:0; left:0; right:0; bottom:0;
+	background: rgba(0,0,0,0.7);
+	display: none;
+	z-index: 999;
+}
+
+#goBackBtn {
+	padding: 10px 16px;
+	font-size: 16px;
+	background: #ff7f50;
+	color: white;
+	border: none;
+	border-radius: 8px;
+	cursor: pointer;
+	margin: 20px auto 40px;
+	display: block;
+	transition: background 0.2s ease, transform 0.1s ease;
+}
+#goBackBtn:hover {
+	background: #ff6347;
+	transform: scale(1.03);
+}
+
+.message {
+	text-align: center;
+	font-size: 16px;
+	margin-bottom: 14px;
+	padding: 10px;
+	border-radius: 8px;
+	display: none;
+}
+
+.message.success {
+	background: #155724;
+	color: #d4edda;
+	border: 1px solid #28a745;
+}
+
+.message.error {
+	background: #721c24;
+	color: #f8d7da;
+	border: 1px solid #c82333;
+}
+
+/* ====== Confirmation Box ====== */
+.confirm-box {
+	display: none;
+	margin-top: 10px;
+	padding: 12px;
+	background: #3a3a3a;
+	border: 1px solid #555;
+	border-radius: 8px;
+	color: #e0e0e0;
+	font-size: 16px;
+	text-align: center;
+}
+.confirm-box p { margin: 0 0 10px; }
+
+.confirm-actions {
+	display: flex;
+	justify-content: center;
+	gap: 10px;
+}
+.confirm-actions button {
+	padding: 8px 14px;
+	border: none;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 15px;
+}
+.confirm-actions button:hover { opacity: 0.9; }
+.confirm-actions .danger { background: #b20000; color: #fff; }
+.confirm-actions button:not(.danger) { background: #555; color: #e0e0e0; }
+
+#editForm input[type="date"] {
+	font-size: 1.2em;
+	padding: 10px;
+	min-height: 48px;
+	width: 100%;
+	box-sizing: border-box;
+	background: #2a2a2a;
+	color: #e0e0e0;
+	border: 1px solid #555;
+}
+#editForm button#saveEdit {
+	font-size: 1.1em;
+	padding: 12px;
+	width: 100%;
+	margin-top: 8px;
+	background: #4CAF50;
+	color: white;
+	border-radius: 8px;
+	border: none;
+}
+
+/* ====== Mobile (<= 1080px) Dark Mode ====== */
+@media (max-width: 1080px) {
+	body {
+		max-width: 100%;
+		margin: 0;
+		padding: 14px;
+		font-size: 16px;
+	}
+
+	h1 { font-size: 32px; margin-bottom: 20px; }
+
+	.notice { font-size: 15px; padding: 12px; margin-bottom: 18px; }
+
+	#stats { font-size: 15px; padding: 14px; margin-bottom: 18px; }
+
+	.weekdays { font-size: 16px; }
+
+	.calendar-header { font-size: 32px; gap: 14px; margin-bottom: 18px; }
+	.nav-btn { font-size: 34px; }
+	.month-label { font-size: 32px; }
+
+	.calendar { gap: 5px; }
+
+	.day {
+		min-height: 30px;
+		font-size: 20px;
+		padding: 10px;
+		color: #e0e0e0;
+	}
+	.day span { font-size: 20px; color: #fff; }
+
+	.actions button { font-size: clamp(14px, 4vw, 18px); padding: 10px; border-radius: 10; }
+
+	.popup {
+		max-width: 95%;
+		padding: 18px;
+		font-size: 14px;
+		border-radius: 12px;
+		background: #1e1e1e;
+		color: #e0e0e0;
+	}
+	.popup h3 { font-size: 18px; margin-bottom: 14px; }
+	.popup button { font-size: clamp(14px, 4vw, 16px); padding: 10px; margin: 10px 0; }
+}

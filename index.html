@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Free Tools Directory</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>🌐 DaUmega Free Tools</h1>
+    <p>Minimalistic, privacy-friendly web apps hosted on GitHub Pages</p>
+    <p class="opensource">
+      All projects here are <strong>free and open source</strong>, 
+      view on 
+      <a href="https://github.com/DaUmega" target="_blank" rel="noopener noreferrer">
+        Github
+      </a>
+    </p>
+  </header>
+
+  <main id="toolList">
+    <!-- Cards injected by JS -->
+  </main>
+
+  <footer>
+    © <span id="year"></span> DaUmega Free Tools  
+    <div id="donate">
+      <p>
+        💰 Support development —
+        <button id="copyBTC" type="button" class="copy-button">
+          Copy BTC Address
+        </button>
+
+        <button id="successMessage" type="button" class="success-message" style="display:none;">
+          Address Copied! ✅
+        </button>
+
+        <span id="copyMessage" class="copy-feedback"></span>
+      </p>
+      <p class="btc-address" id="btcDisplay">
+        bc1qx337zerejukq2fm9tuyplde5aawe5yf8e2hn4f
+      </p>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

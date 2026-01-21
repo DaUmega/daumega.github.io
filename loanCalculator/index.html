@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>💸 Loan Calculator</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<h1>💸 Loan Calculator</h1>
+
+	<div class="notice">
+		⚠️ No data is sent anywhere. This tool runs entirely in your browser.
+	</div>
+
+	<div class="form-container">
+		<label>
+			Loan Amount:
+			<input type="number" id="loanAmount" placeholder="e.g. 250000" />
+		</label>
+		<label>
+			Annual Interest Rate (%):
+			<input type="number" step="0.01" id="interestRate" placeholder="e.g. 5.5" />
+		</label>
+		<label class="loan-term-label">
+			Loan Term:
+			<div class="loan-term-wrapper">
+				<input type="number" id="loanTerm" placeholder="e.g. 6" />
+				<select id="loanTermUnit">
+				<option value="years">Years</option>
+				<option value="months">Months</option>
+				</select>
+			</div>
+		</label>
+		<label>
+			Payment Frequency:
+			<select id="paymentFrequency">
+				<option value="12">Monthly</option>
+				<option value="26">Bi-Weekly</option>
+				<option value="52">Weekly</option>
+				<option value="365">Daily</option>
+			</select>
+		</label>
+		<label>
+			Extra Payment Each Period (Optional):
+			<input type="number" id="extraPayment" placeholder="e.g. 50" />
+		</label>
+		<button id="calculateBtn">Calculate</button>
+	</div>
+
+	<div id="results" class="results-container" style="display: none;">
+		<h3>📊 Regular Payment</h3>
+		<p><strong id="monthlyPayment">$0.00</strong></p>
+
+		<h4>Breakdown:</h4>
+		<ul>
+			<li>Total Payment: <span id="totalPayment">$0.00</span></li>
+			<li>Total Interest: <span id="totalInterest">$0.00</span></li>
+			<li>Number of Payments: <span id="monthsToPayoff">0</span></li>
+		</ul>
+
+		<div class="chart-container">
+			<canvas id="amortizationChart"></canvas>
+		</div>
+	</div>
+
+	<button id="downloadCsvBtn" style="display:none;">💾 Download Amortization CSV</button>
+
+	<button id="goBackBtn">← Go Back</button>
+
+	<script src="script.js"></script>
+</body>
+</html>
