@@ -1,84 +1,33 @@
-// Tool definitions, add more tools here
 const tools = [
-	{
-		name: "QR Code Generator",
-		desc: "Easily Generate QR Code for anything and download, no ads, no bloat, and all frontend!",
-		link: "qrMaker/index.html"
-	},
-	{
-		name: "Period Tracker",
-		desc: "Track your cycle and export/import data securely, all stored locally on your device.",
-		link: "ptracker/index.html"
-	},
-	{
-		name: "Loan Calculator",
-		desc: "Calculate loan payments, interest, and visualize amortization schedules with optional extra payments.",
-		link: "loanCalculator/index.html"
-	},
-	{
-		name: "PeerLive",
-		desc: "Like a crappy Twitch, but more secure with encrypted peer-to-peer traffic, and no data saved anywhere.",
-		link: "https://peerlive.duckdns.org"
-	},
-	{
-		name: "WF PVP Calculator",
-		desc: "Estimate your chance of victory in PvP battles in the mobile game Wing Fighter, using simplified formulas.",
-		link: "WFCalculator/index.html"
-	}
+  { name: "QR Code Generator",   desc: "Generate QR codes for anything and download. No ads, no bloat, all frontend.",                                      link: "qrMaker/index.html" },
+  { name: "Period Tracker",       desc: "Track your cycle with full import/export. All data stays locally on your device.",                                   link: "ptracker/index.html" },
+  { name: "Loan Calculator",      desc: "Calculate payments, interest, and amortization schedules with optional extra payments.",                             link: "loanCalculator/index.html" },
+  { name: "PeerLive",             desc: "Encrypted peer-to-peer streaming. Like Twitch, but no data saved anywhere.",                                         link: "https://peerlive.duckdns.org" },
+  { name: "WF PVP Calculator",    desc: "Estimate your PvP odds in Wing Fighter using simplified combat formulas.",                                           link: "WFCalculator/index.html" },
 ];
 
-// Populate cards
-const container = document.getElementById("toolList");
-
-tools.forEach(tool => {
-	const card = document.createElement("div");
-	card.className = "card";
-
-	const title = document.createElement("h2");
-	title.textContent = tool.name;
-
-	const desc = document.createElement("p");
-	desc.textContent = tool.desc;
-
-	const btn = document.createElement("button");
-	btn.textContent = "Open";
-	btn.addEventListener("click", () => {
-		window.location.href = tool.link;
-	});
-
-	card.append(title, desc, btn);
-	container.appendChild(card);
+const list = document.getElementById("toolList");
+tools.forEach(({ name, desc, link }) => {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>${name}</h2><p>${desc}</p><button>Open</button>`;
+  card.querySelector("button").addEventListener("click", () => window.location.href = link);
+  list.appendChild(card);
 });
 
-// Auto Year in Footer
 document.getElementById("year").textContent = new Date().getFullYear();
 
-// BTC Copy Functionality
-document.getElementById("copyBTC").addEventListener("click", () => {
-    const btcAddress = document.getElementById("btcDisplay").textContent.trim();
-    const copyButton = document.getElementById("copyBTC");
-    const successMessage = document.getElementById("successMessage");
-    const messageSpan = document.getElementById("copyMessage");
+function makeCopyBtn(btnId, displayId, feedbackId) {
+  document.getElementById(btnId).addEventListener("click", () => {
+    const addr = document.getElementById(displayId).textContent.trim();
+    const btn  = document.getElementById(btnId);
+    const fb   = document.getElementById(feedbackId);
+    navigator.clipboard.writeText(addr).then(() => {
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = btnId === "copyBTC" ? "Copy BTC" : "Copy XMR"; }, 3000);
+    }).catch(() => { fb.textContent = "Copy failed - please copy manually."; });
+  });
+}
 
-    // Clear any previous messages
-    messageSpan.textContent = '';
-    messageSpan.style.color = '';
-
-    navigator.clipboard.writeText(btcAddress)
-        .then(() => {
-            copyButton.style.display = 'none';
-            successMessage.style.display = 'inline-block';
-
-            // Revert to the original button after a few seconds
-            setTimeout(() => {
-                successMessage.style.display = 'none';
-                copyButton.style.display = 'inline-block';
-                messageSpan.textContent = '';
-            }, 3000); // 3 seconds
-        })
-        .catch(err => {
-            console.error("Copy failed: ", err);
-            messageSpan.textContent = "Copy Failed. Please copy manually. ❌";
-            messageSpan.style.color = "red";
-        });
-});
+makeCopyBtn("copyBTC", "btcDisplay", "copyBTCFeedback");
+makeCopyBtn("copyXMR", "xmrDisplay", "copyXMRFeedback");

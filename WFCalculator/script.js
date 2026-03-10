@@ -1,150 +1,125 @@
 const toggleBtn = document.getElementById("toggleOptionalBtn");
 const optionalFields = document.getElementById("optionalFields");
 
-document.getElementById("calculateBtn").addEventListener("click", () => {
-	// --- Read helper to parse numeric inputs safely ---
-	function num(id, def = 0) {
-		const v = parseFloat(document.getElementById(id)?.value);
-		return (isNaN(v) ? def : v);
-	}
-
-	// --- Gather player inputs ---
-	const player = {
-		weaponType: document.getElementById("playerWeaponType").value,
-		power: num("playerPower", NaN),
-		physBreak: num("playerPhysBreak", 0),
-		physDef: num("playerPhysDef", 0),
-		energyBreak: num("playerEnergyBreak", 0),
-		energyDef: num("playerEnergyDef", 0),
-		extraAerial: num("playerExtraAerial", 0),
-		reduceAerial: num("playerReduceAerial", 0),
-		extraPlayer: num("playerExtraPlayer", 0),
-		reducePlayer: num("playerReducePlayer", 0),
-
-		// Optional weapon-specific attacks
-		MGAttack: num("playerMGAttack", 0),
-		WGAttack: num("playerWGAttack", 0),
-		MSLAttack: num("playerMSLAttack", 0),
-	};
-
-	// --- Gather enemy inputs ---
-	const enemy = {
-		weaponType: document.getElementById("enemyWeaponType").value,
-		power: num("enemyPower", NaN),
-		physBreak: num("enemyPhysBreak", 0),
-		physDef: num("enemyPhysDef", 0),
-		energyBreak: num("enemyEnergyBreak", 0),
-		energyDef: num("enemyEnergyDef", 0),
-		extraAerial: num("enemyExtraAerial", 0),
-		reduceAerial: num("enemyReduceAerial", 0),
-		extraPlayer: num("enemyExtraPlayer", 0),
-		reducePlayer: num("enemyReducePlayer", 0),
-
-		// Optional weapon-specific attacks
-		MGAttack: num("enemyMGAttack", 0),
-		WGAttack: num("enemyWGAttack", 0),
-		MSLAttack: num("enemyMSLAttack", 0),
-	};
-
-	// Basic validation
-	if (!isFinite(player.power) || player.power <= 0 || !isFinite(enemy.power) || enemy.power <= 0) {
-		alert("Please enter valid positive Power values for both Player and Enemy.");
-		return;
-	}
-
-	// Calculation function
-	function effectivePower(attacker, defender) {
-		const breakStat = (attacker.weaponType === "physical") ? attacker.physBreak : attacker.energyBreak;
-		const defenseStat = (attacker.weaponType === "physical") ? defender.physDef : defender.energyDef;
-
-		const rawFactor = 1 + ((breakStat - defenseStat) * 0.001);
-		const clampedFactor = Math.max(0.5, Math.min(1.5, rawFactor));
-
-		const aerialNet = attacker.extraAerial - defender.reduceAerial;
-		const playerNet = attacker.extraPlayer - defender.reducePlayer;
-
-		const aerialFactor = 1 + (aerialNet / 100);
-		const playerFactor = 1 + (playerNet / 100);
-
-		const safeAerial = Math.max(0, aerialFactor);
-		const safePlayer = Math.max(0, playerFactor);
-
-		const totalMultiplier = safeAerial * safePlayer;
-		return { clampedFactor, totalMultiplier };
-	}
-
-	// --- Calculate effective multipliers ---
-	const playerFactors = effectivePower(player, enemy);
-	const enemyFactors = effectivePower(enemy, player);
-
-	// --- Apply same scaling to Power and the optional attack stats ---
-	function scaleStats(entity, factors) {
-		return {
-			effectivePower: entity.power * factors.clampedFactor * factors.totalMultiplier,
-			effectiveMG: entity.MGAttack * factors.clampedFactor * factors.totalMultiplier,
-			effectiveWG: entity.WGAttack * factors.clampedFactor * factors.totalMultiplier,
-			effectiveMSL: entity.MSLAttack * factors.clampedFactor * factors.totalMultiplier,
-		};
-	}
-
-	const playerScaled = scaleStats(player, playerFactors);
-	const enemyScaled = scaleStats(enemy, enemyFactors);
-
-	// --- Win chance (same as before) ---
-	let winChance;
-	if (enemyScaled.effectivePower <= 0 && playerScaled.effectivePower <= 0) {
-		winChance = 50;
-	} else if (enemyScaled.effectivePower <= 0) {
-		winChance = 100;
-	} else {
-		const ratio = playerScaled.effectivePower / enemyScaled.effectivePower;
-		const steepness = 10;
-		winChance = Math.round(100 / (1 + Math.exp(-steepness * (ratio - 1))));
-		winChance = Math.max(0, Math.min(100, winChance));
-	}
-
-	// --- Output results ---
-	document.getElementById("playerEffectivePower").textContent = playerScaled.effectivePower.toFixed(2);
-	document.getElementById("enemyEffectivePower").textContent = enemyScaled.effectivePower.toFixed(2);
-
-	// Create or update comparison lines for MG/WG/MSL if applicable
-	function setStatLine(id, label, playerVal, enemyVal) {
-		if (playerVal > 0 || enemyVal > 0) {
-			let elem = document.getElementById(id);
-			if (!elem) {
-				const ul = document.querySelector("#results ul");
-				elem = document.createElement("li");
-				elem.id = id;
-				ul.appendChild(elem);
-			}
-			elem.innerHTML = `<strong>${label}:</strong> Player ${playerVal.toFixed(2)} vs Enemy ${enemyVal.toFixed(2)}`;
-		} else {
-			// Remove the line if it exists but both values are 0
-			const elem = document.getElementById(id);
-			if (elem) elem.remove();
-		}
-	}
-
-	setStatLine("mgCompare", "Main Gun Effective Attack", playerScaled.effectiveMG, enemyScaled.effectiveMG);
-	setStatLine("wgCompare", "Wing Gun Effective Attack", playerScaled.effectiveWG, enemyScaled.effectiveWG);
-	setStatLine("mslCompare", "Missile Effective Attack", playerScaled.effectiveMSL, enemyScaled.effectiveMSL);
-
-	document.getElementById("winChance").textContent = `${winChance}%`;
-	document.getElementById("results").style.display = "block";
-});
-
-document.getElementById("goBackBtn").addEventListener("click", () => {
-	window.location.href = "../index.html";
-});
-
-// Toggle Optional Stats section
 toggleBtn.addEventListener("click", () => {
-	const isVisible = optionalFields.style.display === "block";
-	if (isVisible) {
-		optionalFields.style.display = "none";
-		toggleBtn.textContent = "⚙️ Show Optional Stats";
-	} else {
-		optionalFields.style.display = "block";
-		toggleBtn.textContent = "⚙️ Hide Optional Stats";
-	}
+  const open = optionalFields.style.display === "block";
+  optionalFields.style.display = open ? "none" : "block";
+  toggleBtn.textContent = open ? "Show Optional Stats" : "Hide Optional Stats";
+});
+
+document.getElementById("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
+
+document.getElementById("calculateBtn").addEventListener("click", () => {
+  const err = document.getElementById("formError");
+  err.style.display = "none";
+
+  const num = (id, def = 0) => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? def : v; };
+
+  const player = {
+    weaponType:   document.getElementById("playerWeaponType").value,
+    power:        num("playerPower", NaN),
+    dodge:        num("playerDodge", NaN),
+    hit:          num("playerHit", NaN),
+    physBreak:    num("playerPhysBreak"),
+    physDef:      num("playerPhysDef"),
+    energyBreak:  num("playerEnergyBreak"),
+    energyDef:    num("playerEnergyDef"),
+    extraAerial:  num("playerExtraAerial"),
+    reduceAerial: num("playerReduceAerial"),
+    extraPlayer:  num("playerExtraPlayer"),
+    reducePlayer: num("playerReducePlayer"),
+    MGAttack:     num("playerMGAttack"),
+    WGAttack:     num("playerWGAttack"),
+    MSLAttack:    num("playerMSLAttack"),
+  };
+
+  const enemy = {
+    weaponType:   document.getElementById("enemyWeaponType").value,
+    power:        num("enemyPower", NaN),
+    dodge:        num("enemyDodge", NaN),
+    hit:          num("enemyHit", NaN),
+    physBreak:    num("enemyPhysBreak"),
+    physDef:      num("enemyPhysDef"),
+    energyBreak:  num("enemyEnergyBreak"),
+    energyDef:    num("enemyEnergyDef"),
+    extraAerial:  num("enemyExtraAerial"),
+    reduceAerial: num("enemyReduceAerial"),
+    extraPlayer:  num("enemyExtraPlayer"),
+    reducePlayer: num("enemyReducePlayer"),
+    MGAttack:     num("enemyMGAttack"),
+    WGAttack:     num("enemyWGAttack"),
+    MSLAttack:    num("enemyMSLAttack"),
+  };
+
+  // Validation
+  const invalid = [
+    [!isFinite(player.power) || player.power <= 0 || !isFinite(enemy.power) || enemy.power <= 0, "Please enter valid positive Power values for both Player and Enemy."],
+    [!isFinite(player.dodge) || !isFinite(enemy.dodge), "Dodge Rate is required for both Player and Enemy."],
+    [!isFinite(player.hit)   || !isFinite(enemy.hit),   "Hit Rate is required for both Player and Enemy."],
+  ].find(([cond]) => cond);
+
+  if (invalid) { err.textContent = invalid[1]; err.style.display = "block"; return; }
+
+  // Dodge factor: your dodge % minus their hit %, capped 0–80%
+  // Result = how much of enemy attacks you evade (1 = full damage, lower = more evasion)
+  const dodgeFactor = (myDodge, theirHit) => {
+    const effectiveDodge = Math.max(0, Math.min(80, myDodge - theirHit));
+    return 1 - (effectiveDodge / 100);
+  };
+
+  // Defense/break factor
+  const defenseFactor = (attacker, defender) => {
+    const brk = attacker.weaponType === "physical" ? attacker.physBreak : attacker.energyBreak;
+    const def = attacker.weaponType === "physical" ? defender.physDef   : defender.energyDef;
+    return Math.max(0.5, Math.min(1.5, 1 + (brk - def) * 0.001));
+  };
+
+  // Aerial/player damage multiplier
+  const damageMult = (attacker, defender) => {
+    const aerial = Math.max(0, 1 + (attacker.extraAerial - defender.reduceAerial) / 100);
+    const pvp    = Math.max(0, 1 + (attacker.extraPlayer - defender.reducePlayer) / 100);
+    return aerial * pvp;
+  };
+
+  const pDodge = dodgeFactor(player.dodge, enemy.hit);
+  const eDodge = dodgeFactor(enemy.dodge, player.hit);
+
+  const pDefFactor = defenseFactor(player, enemy);
+  const eDefFactor = defenseFactor(enemy, player);
+
+  const pDmgMult = damageMult(player, enemy);
+  const eDmgMult = damageMult(enemy, player);
+
+  // Effective power = raw power * defense factor * damage mult * (1 - enemy dodge)
+  const pEff = player.power * pDefFactor * pDmgMult * eDodge;
+  const eEff = enemy.power  * eDefFactor * eDmgMult * pDodge;
+
+  // Win chance via sigmoid
+  const ratio = eEff > 0 ? pEff / eEff : (pEff > 0 ? Infinity : 1);
+  const winChance = eEff <= 0 && pEff <= 0 ? 50
+    : eEff <= 0 ? 100
+    : Math.max(0, Math.min(100, Math.round(100 / (1 + Math.exp(-10 * (ratio - 1))))));
+
+  // Render core results
+  const fmt = n => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  document.getElementById("playerEffectivePower").textContent = fmt(pEff);
+  document.getElementById("enemyEffectivePower").textContent  = fmt(eEff);
+  document.getElementById("winChance").textContent            = `${winChance}%`;
+
+  // Optional weapon stats
+  const optEl = document.getElementById("optionalResults");
+  optEl.innerHTML = "";
+  [
+    ["Main Gun",  player.MGAttack  * pDefFactor * pDmgMult * eDodge, enemy.MGAttack  * eDefFactor * eDmgMult * pDodge],
+    ["Wing Gun",  player.WGAttack  * pDefFactor * pDmgMult * eDodge, enemy.WGAttack  * eDefFactor * eDmgMult * pDodge],
+    ["Missile",   player.MSLAttack * pDefFactor * pDmgMult * eDodge, enemy.MSLAttack * eDefFactor * eDmgMult * pDodge],
+  ].forEach(([label, pVal, eVal]) => {
+    if (!pVal && !eVal) return;
+    const row = document.createElement("div");
+    row.className = "result-row";
+    row.innerHTML = `<span class="rl">${label} Effective</span><span>Player ${fmt(pVal)} vs Enemy ${fmt(eVal)}</span>`;
+    optEl.appendChild(row);
+  });
+
+  document.getElementById("results").style.display = "block";
 });

@@ -1,32 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>🔳 QR Code Generator</title>
-	<link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QR Code Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-	<h1>🔳 QR Code Generator</h1>
 
-	<div class="notice">
-		⚠️ No data is sent anywhere. This tool runs entirely in your browser.
-	</div>
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>QR Code Generator</h1>
+    <p class="sub">Runs entirely in your browser. No data sent anywhere.</p>
+  </div>
 
-	<div class="form-container">
-		<label>
-			Text / URL:
-			<input type="text" id="qrInput" placeholder="e.g. https://example.com" />
-		</label>
-	</div>
+  <div class="form-container">
+    <label>Text or URL
+      <input type="text" id="qrInput" placeholder="e.g. https://example.com" autocomplete="off">
+    </label>
+  </div>
 
-	<div id="result" class="results-container" style="display:none;">
-		<canvas id="qrCanvas" width="256" height="256"></canvas>
-	</div>
+  <div id="result" style="display:none;">
+    <canvas id="qrCanvas"></canvas>
+    <button id="downloadBtn">Download PNG</button>
+  </div>
 
-	<button id="downloadBtn" style="display:none;">💾 Download PNG</button>
-	<button id="goBackBtn">← Go Back</button>
-
-	<script src="script.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>

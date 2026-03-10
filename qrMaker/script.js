@@ -303,56 +303,44 @@ class Mode { constructor(modeBits, numBitsCharCount) { this.modeBits = modeBits;
 Mode.NUMERIC = new Mode(0x1, [10,12,14]); Mode.ALPHANUMERIC = new Mode(0x2, [9,11,13]); Mode.BYTE = new Mode(0x4, [8,16,16]); Mode.KANJI = new Mode(0x8, [8,10,12]); Mode.ECI = new Mode(0x7, [0,0,0]);
 qrcodegen.QrSegment.Mode = Mode;
 
-/* ---------- Minimal UI ---------- */
-const INP_ID = 'qrInput', CANVAS_ID = 'qrCanvas', RESULT_ID = 'result', DOWNLOAD_ID = 'downloadBtn';
-const BORDER = 4, MIN_CSS = 256, MIN_MODULE_PX = 4, MAX_MODULE_PX = 64, DEBOUNCE = 100;
+/* ---------- UI ---------- */
+const BORDER = 4, MIN_CSS = 256, MIN_PX = 4, MAX_PX = 64, DEBOUNCE = 100;
+const inp = document.getElementById('qrInput');
+const canvas = document.getElementById('qrCanvas');
+const result = document.getElementById('result');
+const dlBtn = document.getElementById('downloadBtn');
+const ctx = canvas.getContext('2d');
 
-const inp = document.getElementById(INP_ID);
-const canvas = document.getElementById(CANVAS_ID);
-const resultDiv = document.getElementById(RESULT_ID);
-const downloadBtn = document.getElementById(DOWNLOAD_ID);
-if (inp && canvas && resultDiv && downloadBtn) {
-	const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas context missing');
-
-	let last = null, timer = 0;
-	inp.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => gen(inp.value || ''), DEBOUNCE); }, { passive: true });
-	downloadBtn.addEventListener('click', () => { const dataURL = canvas.toDataURL('image/png'); const a = document.createElement('a'); a.href = dataURL; a.download = 'qr.png'; a.click(); });
-
-	// initial render
-	gen(inp.value || '');
-
-	function gen(text) {
-		if (text === last) return; last = text;
-		if (!text) { clearCanvas(); resultDiv.style.display = 'none'; downloadBtn.style.display = 'none'; return; }
-
-		const segs = qrcodegen.QrSegment.makeSegments(text);
-		const ecls = [qrcodegen.QrCode.Ecc.MEDIUM, qrcodegen.QrCode.Ecc.LOW];
-		let qr = null;
-		for (const ecl of ecls) { try { qr = qrcodegen.QrCode.encodeSegments(segs, ecl, 1, 40, -1, true); break; } catch (err) { /* try next */ } }
-		if (!qr) { paintError('Too long'); return; }
-
-		const device = window.devicePixelRatio || 1;
-		const containerWidth = canvas.clientWidth || MIN_CSS;
-		let modulePx = Math.floor(containerWidth / (qr.size + BORDER * 2));
-		modulePx = Math.max(MIN_MODULE_PX, Math.min(MAX_MODULE_PX, modulePx));
-		let cssSize = (qr.size + BORDER * 2) * modulePx;
-		if (cssSize < MIN_CSS) {
-			modulePx = Math.ceil(MIN_CSS / (qr.size + BORDER * 2));
-			modulePx = Math.max(MIN_MODULE_PX, Math.min(MAX_MODULE_PX, modulePx));
-			cssSize = (qr.size + BORDER * 2) * modulePx;
-		}
-
-		canvas.style.width = cssSize + 'px'; canvas.style.height = cssSize + 'px'; canvas.width = Math.round(cssSize * device); canvas.height = Math.round(cssSize * device);
-		ctx.setTransform(device, 0, 0, device, 0, 0);
-		ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, cssSize, cssSize);
-		ctx.fillStyle = '#000000';
-		for (let y = 0; y < qr.size; y++) for (let x = 0; x < qr.size; x++) if (qr.getModule(x, y)) { const px = (x + BORDER) * modulePx; const py = (y + BORDER) * modulePx; ctx.fillRect(Math.round(px), Math.round(py), Math.round(modulePx), Math.round(modulePx)); }
-		resultDiv.style.display = 'block'; downloadBtn.style.display = 'inline-block';
-	}
-
-	function clearCanvas() { const device = window.devicePixelRatio || 1; const css = canvas.clientWidth || MIN_CSS; canvas.style.width = css + 'px'; canvas.style.height = css + 'px'; canvas.width = Math.round(css * device); canvas.height = Math.round(css * device); ctx.setTransform(device, 0, 0, device, 0, 0); ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, css, css); }
-
-	function paintError(msg) { const device = window.devicePixelRatio || 1; const css = canvas.clientWidth || MIN_CSS; canvas.style.width = css + 'px'; canvas.style.height = css + 'px'; canvas.width = Math.round(css * device); canvas.height = Math.round(css * device); ctx.setTransform(device, 0, 0, device, 0, 0); ctx.fillStyle = '#fff7f7'; ctx.fillRect(0, 0, css, css); ctx.fillStyle = '#900'; ctx.font = Math.max(12, Math.floor(css / 16)) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(msg, css / 2, css / 2); }
-}
-
+let last = null, timer = 0;
+inp.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => gen(inp.value || ''), DEBOUNCE); }, { passive: true });
+dlBtn.addEventListener('click', () => { const a = Object.assign(document.createElement('a'), { href: canvas.toDataURL('image/png'), download: 'qr.png' }); a.click(); });
 document.getElementById('goBackBtn').addEventListener('click', () => { window.location.href = '../index.html'; });
+
+gen('');
+
+function gen(text) {
+	if (text === last) return; last = text;
+	if (!text) { result.style.display = 'none'; return; }
+
+	let qr = null;
+	for (const ecl of [qrcodegen.QrCode.Ecc.MEDIUM, qrcodegen.QrCode.Ecc.LOW]) {
+		try { qr = qrcodegen.QrCode.encodeSegments(qrcodegen.QrSegment.makeSegments(text), ecl, 1, 40, -1, true); break; } catch {}
+	}
+	if (!qr) return;
+
+	const dpr = window.devicePixelRatio || 1;
+	const cw = canvas.clientWidth || MIN_CSS;
+	let mpx = Math.max(MIN_PX, Math.min(MAX_PX, Math.floor(cw / (qr.size + BORDER * 2))));
+	const css = (qr.size + BORDER * 2) * mpx;
+
+	canvas.style.width = canvas.style.height = css + 'px';
+	canvas.width = canvas.height = Math.round(css * dpr);
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, css, css);
+	ctx.fillStyle = '#000';
+	for (let y = 0; y < qr.size; y++)
+		for (let x = 0; x < qr.size; x++)
+			if (qr.getModule(x, y)) ctx.fillRect(Math.round((x + BORDER) * mpx), Math.round((y + BORDER) * mpx), Math.round(mpx), Math.round(mpx));
+
+	result.style.display = 'flex';
+}

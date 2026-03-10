@@ -1,54 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>🌸 Period Tracker</title>
-	<link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Period Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-	<h1>🌸 Period Tracker</h1>
 
-	<div class="notice">
-		⚠️ Your data is stored only in your browser (localStorage).  
-		To avoid losing it, please <strong>export regularly</strong> and save securely.  
-		You can later import it here or on another device.
-	</div>
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Period Tracker</h1>
+    <p class="sub">Data stays on your device. Nothing leaves your browser.</p>
+  </div>
 
-	<div id="message" class="message"></div>
-	<div class="calendar-container">
-		<div class="weekdays">
-			<div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-		</div>
-		<div id="calendar" class="calendar"></div>
-	</div>
-	<div id="stats"></div>
+  <div class="notice">
+    Export your data regularly to avoid losing it. You can re-import it here or on another device.
+  </div>
 
-	<div class="actions">
-		<button id="exportBtn">Export Data</button>
-		<input type="file" id="importFile" style="display:none;" accept="application/json">
-		<button id="importBtn">Import Data</button>
-		<button id="clearBtn">Clear Data</button>
-	</div>
+  <div id="message" class="message"></div>
 
-	<div id="clearConfirm" class="confirm-box">
-		<p>Are you sure you want to clear all data?</p>
-		<div class="confirm-actions">
-			<button id="yesClear" class="danger">Yes, Clear</button>
-			<button id="noClear">Cancel</button>
-		</div>
-	</div>
+  <div class="calendar-container">
+    <div class="weekdays">
+      <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+    </div>
+    <div id="calendar" class="calendar"></div>
+  </div>
 
-	<!-- Popup -->
-	<div class="overlay" id="overlay"></div>
-	<div class="popup" id="popup">
-		<h3 id="popupDate"></h3>
-		<div id="popupContent"></div>
-		<button onclick="closePopup()">Close</button>
-	</div>
+  <div id="stats"></div>
 
-	<button id="goBackBtn">← Go Back</button>
+  <div class="legend">
+    <span class="legend-item"><span class="swatch period"></span> Period</span>
+    <span class="legend-item"><span class="swatch predicted"></span> Predicted</span>
+    <span class="legend-item"><span class="swatch fertile"></span> Fertile</span>
+    <span class="legend-item"><span class="swatch ovulation"></span> Ovulation</span>
+  </div>
 
-	<script src="script.js"></script>
+  <div class="actions">
+    <button id="exportBtn">Export</button>
+    <input type="file" id="importFile" style="display:none;" accept="application/json">
+    <button id="importBtn">Import</button>
+    <button id="clearBtn" class="danger-btn">Clear Data</button>
+  </div>
+
+  <div id="clearConfirm" class="confirm-box">
+    <p>Are you sure you want to clear all data?</p>
+    <div class="confirm-actions">
+      <button id="yesClear" class="danger">Yes, Clear</button>
+      <button id="noClear">Cancel</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="popup" id="popup">
+    <h3 id="popupDate"></h3>
+    <div id="popupContent"></div>
+    <button onclick="closePopup()">Close</button>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>

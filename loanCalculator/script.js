@@ -7,54 +7,37 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
     const extraPayment = parseFloat(document.getElementById("extraPayment").value) || 0;
 
     if (isNaN(amount) || isNaN(annualRate) || isNaN(termValue) || amount <= 0 || annualRate <= 0 || termValue <= 0) {
-        alert("Please enter valid numbers.");
+        const err = document.getElementById("formError");
+        err.textContent = "Please enter valid positive numbers for all required fields.";
+        err.style.display = "block";
         return;
     }
+    document.getElementById("formError").style.display = "none";
 
-    // Convert loan term into years
     const years = (termUnit === "months") ? termValue / 12 : termValue;
-
     const ratePerPeriod = annualRate / 100 / paymentsPerYear;
     const totalPayments = years * paymentsPerYear;
 
-    // Formula: M = P[r(1+r)^n]/[(1+r)^n – 1]
     const numerator = amount * ratePerPeriod * Math.pow(1 + ratePerPeriod, totalPayments);
     const denominator = Math.pow(1 + ratePerPeriod, totalPayments) - 1;
     const basePayment = numerator / denominator;
 
-    let balance = amount;
-    let principalData = [];
-    let interestData = [];
-    let totalInterest = 0;
-    let paymentCount = 0;
-
-    let amortizationSchedule = [];
+    let balance = amount, principalData = [], interestData = [];
+    let totalInterest = 0, paymentCount = 0, amortizationSchedule = [];
 
     while (balance > 0 && paymentCount < totalPayments + 1) {
         paymentCount++;
         let interestPayment = balance * ratePerPeriod;
-        let principalPayment = basePayment - interestPayment;
-
-        principalPayment += extraPayment;
-
+        let principalPayment = basePayment - interestPayment + extraPayment;
         if (principalPayment > balance) {
             principalPayment = balance;
             interestPayment = balance * ratePerPeriod;
         }
-
         balance -= principalPayment;
         totalInterest += interestPayment;
-
         principalData.push(principalPayment);
         interestData.push(interestPayment);
-
-        amortizationSchedule.push({
-            Payment: paymentCount,
-            Principal: principalPayment.toFixed(2),
-            Interest: interestPayment.toFixed(2),
-            Balance: balance.toFixed(2)
-        });
-
+        amortizationSchedule.push({ Payment: paymentCount, Principal: principalPayment.toFixed(2), Interest: interestPayment.toFixed(2), Balance: balance.toFixed(2) });
         if (balance <= 0) break;
     }
 
@@ -65,24 +48,19 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
     document.getElementById("monthlyPayment").textContent = formatCurrency(basePayment);
     document.getElementById("totalPayment").textContent = formatCurrency(totalPaid);
     document.getElementById("totalInterest").textContent = formatCurrency(totalInterest);
-    document.getElementById("monthsToPayoff").textContent = `${paymentCount} (${(paymentCount / paymentsPerYear).toFixed(2)} years)`;
+    document.getElementById("monthsToPayoff").textContent = `${paymentCount} (${(paymentCount / paymentsPerYear).toFixed(2)} yrs)`;
 
-    // Remove old interest saved element if it exists
-    let oldSaved = document.getElementById("interestSaved");
-    if (oldSaved) oldSaved.remove();
-
-    // Add new interest saved element
+    document.getElementById("interestSaved")?.remove();
     if (extraPayment > 0) {
-        let savedElem = document.createElement("p");
-        savedElem.id = "interestSaved";
-        savedElem.innerHTML = `<strong style="color:#2a7f62">Interest Saved: ${formatCurrency(interestSaved)}</strong>`;
-        document.getElementById("results").appendChild(savedElem);
+        const el = document.createElement("p");
+        el.id = "interestSaved";
+        el.textContent = `Interest Saved: ${formatCurrency(interestSaved)}`;
+        document.getElementById("results").appendChild(el);
     }
 
     document.getElementById("results").style.display = "block";
     drawChart(principalData, interestData);
 
-    // Show CSV download button
     const downloadBtn = document.getElementById("downloadCsvBtn");
     downloadBtn.style.display = "block";
     downloadBtn.onclick = () => downloadCsv(amortizationSchedule);
@@ -95,118 +73,89 @@ function formatCurrency(num) {
 function drawChart(principalData, interestData) {
     const canvas = document.getElementById("amortizationChart");
     const ctx = canvas.getContext("2d");
-
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const totalPeriods = principalData.length;
-    const marginLeft = 60;
-    const marginBottom = 40;
-    const marginTop = 20;
-    const marginRight = 20;
-
-    const chartWidth = canvas.width - marginLeft - marginRight;
-    const chartHeight = canvas.height - marginTop - marginBottom;
-
-    const barWidth = chartWidth / totalPeriods;
+    const mL = 60, mB = 40, mT = 20, mR = 20;
+    const cW = canvas.width - mL - mR;
+    const cH = canvas.height - mT - mB;
+    const barWidth = cW / totalPeriods;
     const maxPayment = Math.max(...principalData.map((p, i) => p + interestData[i]));
 
+    // Theme colors
+    const colorAxis   = "rgba(255,255,255,0.15)";
+    const colorLabel  = "#94a3b8";
+    const colorPrin   = "rgba(6,182,212,0.75)";
+    const colorInt    = "rgba(244,63,94,0.7)";
+
     // Axes
-    ctx.strokeStyle = "#000";
+    ctx.strokeStyle = colorAxis;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(marginLeft, marginTop);
-    ctx.lineTo(marginLeft, canvas.height - marginBottom);
-    ctx.lineTo(canvas.width - marginRight, canvas.height - marginBottom);
+    ctx.moveTo(mL, mT);
+    ctx.lineTo(mL, canvas.height - mB);
+    ctx.lineTo(canvas.width - mR, canvas.height - mB);
     ctx.stroke();
 
     // Y-axis labels
-    ctx.fillStyle = "#000";
-    ctx.font = "12px Arial";
+    ctx.fillStyle = colorLabel;
+    ctx.font = "11px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
-    let steps = 5;
-    for (let i = 0; i <= steps; i++) {
-        let val = (maxPayment / steps) * i;
-        let y = canvas.height - marginBottom - (val / maxPayment) * chartHeight;
-        ctx.fillText("$" + Math.round(val), marginLeft - 8, y + 4);
-        ctx.beginPath();
-        ctx.moveTo(marginLeft - 3, y);
-        ctx.lineTo(marginLeft + 3, y);
-        ctx.stroke();
+    for (let i = 0; i <= 5; i++) {
+        const val = (maxPayment / 5) * i;
+        const y = canvas.height - mB - (val / maxPayment) * cH;
+        ctx.fillText("$" + Math.round(val), mL - 8, y + 4);
+        ctx.strokeStyle = "rgba(255,255,255,0.05)";
+        ctx.beginPath(); ctx.moveTo(mL, y); ctx.lineTo(canvas.width - mR, y); ctx.stroke();
     }
 
     // X-axis labels
+    ctx.fillStyle = colorLabel;
     ctx.textAlign = "center";
     for (let i = 0; i <= totalPeriods; i += Math.ceil(totalPeriods / 10)) {
-        let x = marginLeft + i * barWidth;
-        ctx.fillText(i.toString(), x, canvas.height - 20);
-        ctx.beginPath();
-        ctx.moveTo(x, canvas.height - marginBottom - 3);
-        ctx.lineTo(x, canvas.height - marginBottom + 3);
-        ctx.stroke();
+        const x = mL + i * barWidth;
+        ctx.fillText(i.toString(), x, canvas.height - 8);
     }
 
-    // Draw bars
+    // Bars
     for (let i = 0; i < totalPeriods; i++) {
-        let interestHeight = (interestData[i] / maxPayment) * chartHeight;
-        let principalHeight = (principalData[i] / maxPayment) * chartHeight;
-
-        let x = marginLeft + i * barWidth;
-        let yInterest = canvas.height - marginBottom - interestHeight;
-        let yPrincipal = yInterest - principalHeight;
-
-        ctx.fillStyle = "rgba(255,0,0,0.7)";
-        ctx.fillRect(x, yInterest, barWidth, interestHeight);
-
-        ctx.fillStyle = "rgba(0,0,255,0.7)";
-        ctx.fillRect(x, yPrincipal, barWidth, principalHeight);
+        const x = mL + i * barWidth;
+        const iH = (interestData[i] / maxPayment) * cH;
+        const pH = (principalData[i] / maxPayment) * cH;
+        const yI = canvas.height - mB - iH;
+        const yP = yI - pH;
+        ctx.fillStyle = colorInt;  ctx.fillRect(x, yI, barWidth, iH);
+        ctx.fillStyle = colorPrin; ctx.fillRect(x, yP, barWidth, pH);
     }
 
     // Axis labels
-    ctx.font = "14px Arial";
+    ctx.fillStyle = colorLabel;
+    ctx.font = "11px 'JetBrains Mono', monospace";
     ctx.textAlign = "center";
-    ctx.fillText("Payments →", canvas.width / 2, canvas.height - 5);
-
+    ctx.fillText("Payments", canvas.width / 2, canvas.height - 2);
     ctx.save();
     ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = "center";
-    ctx.fillText("Payment Amount ($)", -canvas.height / 2, 15);
+    ctx.fillText("Amount ($)", -canvas.height / 2, 12);
     ctx.restore();
 
     // Legend
-    const legendX = canvas.width - 120;
-    const legendY = 20;
-    ctx.fillStyle = "rgba(255,0,0,0.7)";
-    ctx.fillRect(legendX, legendY, 15, 15);
-    ctx.fillStyle = "#000";
-    ctx.textAlign = "left";
-    ctx.fillText("Interest", legendX + 20, legendY + 12);
-
-    ctx.fillStyle = "rgba(0,0,255,0.7)";
-    ctx.fillRect(legendX, legendY + 25, 15, 15);
-    ctx.fillStyle = "#000";
-    ctx.fillText("Principal", legendX + 20, legendY + 37);
+    const lX = canvas.width - 100, lY = mT;
+    ctx.fillStyle = colorInt;  ctx.fillRect(lX, lY, 12, 12);
+    ctx.fillStyle = colorLabel; ctx.textAlign = "left"; ctx.font = "11px 'JetBrains Mono', monospace";
+    ctx.fillText("Interest", lX + 17, lY + 10);
+    ctx.fillStyle = colorPrin; ctx.fillRect(lX, lY + 20, 12, 12);
+    ctx.fillStyle = colorLabel;
+    ctx.fillText("Principal", lX + 17, lY + 30);
 }
 
 function downloadCsv(schedule) {
     const header = ["Payment", "Principal", "Interest", "Balance"];
     const rows = schedule.map(p => [p.Payment, p.Principal, p.Interest, p.Balance]);
-
-    let csvContent = "data:text/csv;charset=utf-8," 
-        + header.join(",") + "\n"
-        + rows.map(e => e.join(",")).join("\n");
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "amortization_schedule.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csv = "data:text/csv;charset=utf-8," + header.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+    const a = Object.assign(document.createElement("a"), { href: encodeURI(csv), download: "amortization_schedule.csv" });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-document.getElementById("goBackBtn").addEventListener("click", () => {
-    window.location.href = "../index.html";
-});
+document.getElementById("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
