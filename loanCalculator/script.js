@@ -25,7 +25,7 @@ document.getElementById("calculateBtn").addEventListener("click", () => {
     let balance = amount, principalData = [], interestData = [];
     let totalInterest = 0, paymentCount = 0, amortizationSchedule = [];
 
-    while (balance > 0 && paymentCount < totalPayments + 1) {
+    while (balance > 0 && paymentCount < totalPayments) {
         paymentCount++;
         let interestPayment = balance * ratePerPeriod;
         let principalPayment = basePayment - interestPayment + extraPayment;
