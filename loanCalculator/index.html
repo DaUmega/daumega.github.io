@@ -20,6 +20,12 @@
   <div id="formError" class="form-error" style="display:none;"></div>
 
   <div class="form-container">
+
+    <div class="section-row">
+      <span class="section-label">Loan Details</span>
+      <span class="badge required">required</span>
+    </div>
+
     <label>Loan Amount
       <input type="number" id="loanAmount" placeholder="e.g. 250000">
     </label>
@@ -28,24 +34,72 @@
     </label>
     <label>Loan Term
       <div class="loan-term-wrapper">
-        <input type="number" id="loanTerm" placeholder="e.g. 6">
+        <input type="number" id="loanTerm" placeholder="e.g. 25">
         <select id="loanTermUnit">
           <option value="years">Years</option>
           <option value="months">Months</option>
         </select>
       </div>
     </label>
-    <label>Payment Frequency
-      <select id="paymentFrequency">
-        <option value="12">Monthly</option>
-        <option value="26">Bi-Weekly</option>
-        <option value="52">Weekly</option>
-        <option value="365">Daily</option>
-      </select>
+    <div class="two-col">
+      <label>Payment Frequency
+        <select id="paymentFrequency">
+          <option value="12">Monthly</option>
+          <option value="26">Bi-Weekly</option>
+          <option value="52">Weekly</option>
+          <option value="365">Daily</option>
+        </select>
+      </label>
+      <label>Compounding
+        <select id="compoundFrequency">
+          <option value="12">Monthly</option>
+          <option value="365">Daily</option>
+          <option value="2">Semi-Annual</option>
+          <option value="1">Annual</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="section-row">
+      <span class="section-label">Interest Adjustment Day</span>
+      <span class="badge">optional</span>
+    </div>
+    <label class="hint">Days between funding date and first payment period start
+      <input type="number" id="iadDays" placeholder="e.g. 40  (funded Feb 20 → payment starts Apr 1 = 40 days)">
     </label>
-    <label>Extra Payment Per Period (optional)
-      <input type="number" id="extraPayment" placeholder="e.g. 50">
-    </label>
+
+    <div class="section-row">
+      <span class="section-label">Prepayments</span>
+      <span class="badge">optional · combine any</span>
+    </div>
+
+    <div class="prepay-row">
+      <label>Per Payment
+        <input type="number" id="ppAmount" placeholder="e.g. 200">
+      </label>
+      <label>Starting payment
+        <input type="number" id="ppStart" min="1" value="1">
+      </label>
+    </div>
+
+    <div class="prepay-row">
+      <label>Annual
+        <input type="number" id="annualAmount" placeholder="e.g. 5000">
+      </label>
+      <label>Starting payment
+        <input type="number" id="annualStart" min="1" value="1">
+      </label>
+    </div>
+
+    <div class="prepay-row">
+      <label>One-Time Lump Sum
+        <input type="number" id="lumpAmount" placeholder="e.g. 20000">
+      </label>
+      <label>At payment
+        <input type="number" id="lumpAt" min="1" value="1">
+      </label>
+    </div>
+
     <button id="calculateBtn">Calculate</button>
   </div>
 
@@ -55,16 +109,19 @@
       <strong id="monthlyPayment">$0.00</strong>
     </div>
     <div class="result-grid">
-      <div class="result-item"><span class="ri-label">Total Paid</span><span id="totalPayment">$0.00</span></div>
-      <div class="result-item"><span class="ri-label">Total Interest</span><span id="totalInterest">$0.00</span></div>
-      <div class="result-item"><span class="ri-label">Payments</span><span id="monthsToPayoff">0</span></div>
+      <div class="result-item"><span class="ri-label">Total Paid</span><span id="totalPayment"></span></div>
+      <div class="result-item"><span class="ri-label">Total Interest</span><span id="totalInterest"></span></div>
+      <div class="result-item"><span class="ri-label">Payments</span><span id="monthsToPayoff"></span></div>
+      <div class="result-item" id="iadRow" style="display:none;"><span class="ri-label">IAD Interest</span><span id="iadInterestVal"></span></div>
+      <div class="result-item" id="savedRow" style="display:none;"><span class="ri-label">Interest Saved</span><span id="interestSaved" class="green"></span></div>
+      <div class="result-item" id="soonerRow" style="display:none;"><span class="ri-label">Paid Off Sooner</span><span id="payoffSooner" class="green"></span></div>
     </div>
     <div class="chart-container">
       <canvas id="amortizationChart"></canvas>
     </div>
   </div>
 
-  <button id="downloadCsvBtn" style="display:none;">Download Amortization CSV</button>
+  <button id="downloadCsvBtn" style="display:none;">⬇ Download Amortization CSV</button>
 
   <script src="script.js"></script>
 </body>
