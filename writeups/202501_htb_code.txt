@@ -1,0 +1,101 @@
+Title: Code
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Code was a Linux box built around a web app that offers an in-browser Python "code execution" sandbox. The sandbox blocks dangerous keywords like "import", but the filter is bypassed with a character-code-obfuscated payload and a classic Python object-introspection trick to reach the `os` module without ever typing the word "import". That yields an initial shell, which leads to an application SQLite database containing a crackable credential for a local user. SSH access as that user exposes a sudo-permitted backup script whose path-sanitization logic can be bypassed with an overlapping traversal string, allowing an attacker-controlled backup job to archive `/root` and retrieve the root flag.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.62
+PORT     STATE SERVICE
+22/tcp   open  ssh
+5000/tcp open  upnp
+
+> nmap -sC -sV --script vuln -p5000 10.10.11.62
+PORT     STATE SERVICE VERSION
+5000/tcp open  http    Gunicorn 20.0.4
+```
+
+Port 5000 is a Flask app served by Gunicorn, hosting a code-execution "sandbox" page along with login/register forms.
+
+## Foothold - Python Sandbox Escape
+
+The sandbox evaluates user-submitted Python but filters out certain keywords directly in the input, including "import". Since the filter is a simple string check, it doesn't stop code that never contains the literal blocked words:
+
+- The reverse shell command was built at runtime from a list of character codes (`chr(x) for x in [...]`) instead of being written as a string literal, hiding it from any naive keyword/string filtering.
+- To reach process-execution functionality without an `import` statement, the payload walked Python's live class hierarchy (`().__class__.__base__.__subclasses__()`), searching each subclass's `__init__.__globals__` for a reference to the already-loaded `os` module, then called `os.system()` on it directly. This is a well-known sandbox escape technique that abuses objects Python has already imported elsewhere in the process, so it never needs its own `import` call.
+
+Submitting this payload triggered a reverse shell back to a listener, giving code execution as the user running the Flask application.
+
+## Credential Harvesting
+
+Running linpeas.sh on the box flagged the host as vulnerable to CVE-2021-3560 (a Polkit/dbus privilege-escalation issue), but the path actually used to escalate came from application data instead:
+
+- The app's SQLite database at `~/app/instance/database.db` was readable and, when inspected, contained a local username `martin` alongside an MD5 password hash.
+- That hash was cracked via CrackStation to recover the plaintext password `nafeelswordsmaster`.
+
+## Lateral Movement - SSH as martin
+
+```
+> ssh martin@10.10.11.62
+```
+
+The cracked credentials (`martin:nafeelswordsmaster`) worked directly over SSH, giving an interactive user shell and access to the user flag.
+
+## Privilege Escalation - backy.sh Path Traversal
+
+```
+martin> sudo -l
+User martin may run the following commands on localhost:
+    (ALL : ALL) NOPASSWD: /usr/bin/backy.sh
+```
+
+`backy.sh` runs as root via sudo with no password and takes a JSON task file (`task.json`) describing directories to back up into a tar.bz2 archive:
+
+```json
+{
+    "destination": "/home/martin/backups/",
+    "multiprocessing": true,
+    "verbose_log": false,
+    "directories_to_archive": [
+        "/home/app-production/app"
+    ],
+    "exclude": [
+        ".*"
+    ]
+}
+```
+
+The script sanitizes each path with something equivalent to `gsub("\\.\\./"; "")` - stripping occurrences of `../` from the input. The substitution only removes one layer of `../` per overlapping match rather than recursively re-scanning the result, so a crafted string like `....//` survives sanitization as a working `../` sequence (removing the inner `../` from `....//` leaves the outer `..` and `/` still adjacent, reconstituting `../`).
+
+Using that bypass, `task.json` was rewritten to point outside the intended directory and the exclude rule was removed:
+
+```json
+{
+    "destination": "/home/martin/backups/",
+    "multiprocessing": true,
+    "verbose_log": false,
+    "directories_to_archive": [
+        "/home/....//root"
+    ]
+}
+```
+
+Running the backup as root with this task file archived `/root` instead of the intended application directory:
+
+```
+martin> sudo /usr/bin/backy.sh task.json
+martin> tar -xjvf code_home_.._root_2025_April.tar.bz2
+```
+
+Extracting the resulting archive exposed the contents of `/root`, including the root flag.
+
+## Takeaways
+
+- Keyword-based filters on user-submitted code are easy to bypass: building strings from character codes at runtime, and reaching privileged builtins through Python's live object graph (`__class__.__base__.__subclasses__()`), avoids ever typing a blocked word like "import".
+- Application database files can leak crackable credentials if they're readable by the account running the app and password hashing is weak (e.g. unsalted MD5).
+- Path-sanitization logic that strips a traversal pattern only once, instead of iterating until no more matches are found, can be bypassed with overlapping sequences such as `....//`.
+- A NOPASSWD sudo rule for a script that consumes attacker-editable JSON input is only as safe as that script's handling of paths inside the JSON - user-controlled destinations/sources need strict canonicalization, not a single string substitution.

