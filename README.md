@@ -1,6 +1,6 @@
-# DaUmega Tools
+# DaUmega Resources
 
-This repository contains a growing collection of small, privacy-friendly web apps and utilities I’ve built.
+This repository contains a growing collection of small, privacy-friendly web apps and utilities I’ve built, along with security-focused writeups.
 
 All tools are:
 - **Free and open source**
@@ -26,6 +26,12 @@ This repository hosts a variety of independent tools, including (but not limited
 New tools may be added, improved, or retired over time.
 
 For the most up-to-date list, browse the repository folders or visit the live site.
+
+---
+
+## Writeups
+
+The site also includes a **Writeups** section for HTB, CTF, and other offensive security related writeups.
 
 ---
 

