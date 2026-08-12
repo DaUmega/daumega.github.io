@@ -1,7 +1,7 @@
 // Each writeup is a plain .txt file parsed at view-time by reader.html.
 // Add new writeups here after publishing the .txt file into /writeups/.
 const writeups = [
-  { title: "2025 Hackfest SilentShadow", tag: "CTF", date: "2025-10-16", file: "writeups/202510_hackfest_silentshadow.txt" },
+  { title: "2025 Hackfest - SilentShadow", tag: "CTF", date: "2025-10-16", file: "writeups/202510_hackfest_silentshadow.txt" },
   { title: "2025 HTB - Code", tag: "HTB", date: "2025-01-01", file: "writeups/202501_htb_code.txt" },
   { title: "2025 HTB - Artificial", tag: "HTB", date: "2025-01-01", file: "writeups/202501_htb_artificial.txt" },
   { title: "2025 HTB - Backfire", tag: "HTB", date: "2025-01-01", file: "writeups/202501_htb_backfire.txt" },
