@@ -1,8 +1,8 @@
 const tools = [
-  { name: "QR Code Generator",   desc: "Generate QR codes for anything and download. No ads, no bloat, all frontend.",                                      link: "qrMaker/index.html" },
+  { name: "QR Code Generator",   desc: "Generate QR codes for anything and download. No ads, no bloat, all frontend.",                                        link: "qrMaker/index.html" },
   { name: "Period Tracker",       desc: "Track your cycle with full import/export. All data stays locally on your device.",                                   link: "ptracker/index.html" },
   { name: "Loan Calculator",      desc: "Calculate payments, interest, and amortization schedules with optional extra payments.",                             link: "loanCalculator/index.html" },
-  { name: "PeerLive",             desc: "Encrypted peer-to-peer streaming. Like Twitch, but no data saved anywhere.",                                         link: "https://peerlive.duckdns.org" },
+  { name: "P2PChat",             desc: "Encrypted peer-to-peer chatroom, file sharing, video streaming. No data saved anywhere.",                             link: "https://peerlive.duckdns.org" },
   { name: "WF PVP Calculator",    desc: "Estimate your PvP odds in Wing Fighter using simplified combat formulas.",                                           link: "WFCalculator/index.html" },
 ];
 
