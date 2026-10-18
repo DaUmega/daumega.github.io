@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crosswords &amp; Fill-ins — DaUmega</title>
+  <meta name="description" content="In-browser crossword and fill-in puzzles. Generated locally, progress saved in your browser only.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Crosswords &amp; Fill-ins</h1>
+    <p class="sub">Fresh puzzle generated in your browser every time. Progress saves locally, nothing leaves your device.</p>
+    <div class="controls">
+      <div class="seg" id="modeSeg" role="tablist" aria-label="puzzle type">
+        <button data-mode="cross" class="on">Crossword</button>
+        <button data-mode="fill">Fill-in</button>
+        <button data-mode="plates">License plates</button>
+      </div>
+      <div class="seg" id="diffSeg" role="tablist" aria-label="difficulty">
+        <button data-diff="easy">Easy</button>
+        <button data-diff="medium" class="on">Medium</button>
+        <button data-diff="hard">Hard</button>
+        <button data-diff="extreme">Extreme</button>
+      </div>
+      <button id="newBtn" class="primary">New puzzle</button>
+    </div>
+  </div>
+
+  <main class="board-wrap">
+    <div class="board-col">
+      <div id="grid" class="grid" role="grid" aria-label="puzzle grid"></div>
+      <div class="actions">
+        <button id="checkBtn">Check</button>
+        <button id="revealLetterBtn">Reveal letter</button>
+        <button id="revealWordBtn">Reveal word</button>
+        <button id="revealAllBtn">Reveal puzzle</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </div>
+    <aside class="side-col">
+      <div id="cluePane">
+        <div class="clue-group">
+          <h2>Across</h2>
+          <ol id="across"></ol>
+        </div>
+        <div class="clue-group">
+          <h2>Down</h2>
+          <ol id="down"></ol>
+        </div>
+      </div>
+      <div id="bankPane" hidden>
+        <p class="bank-hint">Tap an entry, then tap a slot. Or just type straight into the grid.</p>
+        <div id="bank"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
