@@ -48,33 +48,77 @@ function clueText(s) {
 
 /* ---------------- crossword mode: classic sparse generator ---------------- */
 
-function pickWord(L) {
+function pickWord(L, needDefs) {
   const arr = WORDS[L] || [];
-  return arr[(Math.random() * arr.length) | 0];
+  if (!needDefs) return arr[(Math.random() * arr.length) | 0];
+  // crosswords: only pick from words that have definitions for clues
+  for (let t = 0; t < 50; t++) {
+    const w = arr[(Math.random() * arr.length) | 0];
+    if (w && DEFS[w]) return w;
+  }
+  return null;
 }
 
-function buildIndex(minLen, maxLen) {
+function pluralOf(w) {
+  // naive S/ES plural; good enough to thicken generation pools (fill-ins
+  // don't show definitions, and crosswords fall back to "N letters").
+  if (/[sxz]$|ch$|sh$/i.test(w)) return w + "ES";
+  return w + "S";
+}
+
+const _indexCache = {};
+function buildIndex(minLen, maxLen, needDefs) {
+  const key = minLen + "-" + maxLen + "-" + (needDefs ? 1 : 0);
+  if (_indexCache[key]) return _indexCache[key];
   const idx = {};
+  const seen = {};
   for (let L = minLen; L <= maxLen; L++) {
     const pos = [];
     for (let k = 0; k < L; k++) pos.push({});
+    seen[L] = new Set(WORDS[L] || []);
+    // base words (crosswords need a definition for the clue; fill-ins don't)
     for (const w of (WORDS[L] || [])) {
+      if (needDefs && !DEFS[w]) continue;
       for (let k = 0; k < L; k++) {
         const m = pos[k];
         (m[w[k]] = m[w[k]] || []).push(w);
       }
     }
+    // plurals of (L-1)-letter words, if they fit this length and aren't dupes
+    // (fill-ins only; they have no definitions for crossword clues)
+    if (!needDefs && L >= 4 && L <= 7) {
+      for (const w of (WORDS[L - 1] || [])) {
+        const p = pluralOf(w);
+        if (p.length !== L || seen[L].has(p)) continue;
+        seen[L].add(p);
+        for (let k = 0; k < L; k++) {
+          const m = pos[k];
+          (m[p[k]] = m[p[k]] || []).push(p);
+        }
+      }
+      // plurals of (L-2)-letter words via +ES (e.g. BOX->BOXES)
+      for (const w of (WORDS[L - 2] || [])) {
+        const p = pluralOf(w);
+        if (p.length !== L || seen[L].has(p)) continue;
+        seen[L].add(p);
+        for (let k = 0; k < L; k++) {
+          const m = pos[k];
+          (m[p[k]] = m[p[k]] || []).push(p);
+        }
+      }
+    }
     idx[L] = pos;
   }
+  _indexCache[key] = idx;
   return idx;
 }
 
 // One attempt at a crossword grid. Returns puzzle or null if too sparse.
 function generateCrossword(cfg) {
-  const { size, minLen, maxLen, target } = cfg;
+  const { size, minLen, maxLen, target, needDefs } = cfg;
   const grid = [];
   for (let r = 0; r < size; r++) grid.push(new Array(size).fill(null));
-  const slots = [], used = new Set(), idx = buildIndex(minLen, maxLen);
+  const slots = [], used = new Set(), idx = buildIndex(minLen, maxLen, needDefs);
 
   function place(r, c, dir, word) {
     const dr = dir === "D" ? 1 : 0, dc = dir === "A" ? 1 : 0;
@@ -116,12 +160,17 @@ function generateCrossword(cfg) {
 
   function dictCands(L, k, ch) {
     const arr = (((idx[L] || [])[k] || {})[ch]) || [];
-    return shuffled(arr.slice()).slice(0, 30);
+    // pick up to 30 random candidates without shuffling the whole array
+    // (arrays can be huge with the supplemented wordlist; full shuffle was
+    // causing the laptop-heating slowdown on medium fill-ins)
+    const n = Math.min(30, arr.length), out = [];
+    for (let i = 0; i < n; i++) out.push(arr[(Math.random() * arr.length) | 0]);
+    return out;
   }
 
   // seed word in the middle
   const seedLen = minLen + ((Math.random() * (Math.min(maxLen, size) - minLen + 1)) | 0);
-  const seedWord = pickWord(seedLen);
+  const seedWord = pickWord(seedLen, needDefs);
   if (!seedWord) return null;
   place((size >> 1), (size - seedWord.length) >> 1, "A", seedWord);
 
@@ -156,102 +205,66 @@ function generateCrossword(cfg) {
 
 // Carve a sparse set of black squares (180-degree symmetry) so that every
 // white run has length within [minLen, maxLen] and all white cells connect.
+// Minimalist block carving for plates/fill: place random blocks, ensuring
+// no white run is shorter than minLen. No symmetry, no connectivity check
+// (dense grids stay connected). Long runs are split to stay under maxLen.
 function carveBlocks(size, nBlocks, minLen, maxLen) {
   const key = (r, c) => r + "," + c;
   const white = (blocks, r, c) => r >= 0 && r < size && c >= 0 && c < size && !blocks.has(key(r, c));
 
-  function runsMinOK(blocks) {
-    for (let r = 0; r < size; r++) for (let c = 0; c < size;) {
-      if (white(blocks, r, c) && !white(blocks, r, c - 1)) {
-        let L = 0; while (white(blocks, r, c + L)) L++;
-        if (L < minLen) return false;
-        c += L;
-      } else c++;
-    }
-    for (let c = 0; c < size; c++) for (let r = 0; r < size;) {
-      if (white(blocks, r, c) && !white(blocks, r - 1, c)) {
-        let L = 0; while (white(blocks, r + L, c)) L++;
-        if (L < minLen) return false;
-        r += L;
-      } else r++;
-    }
+  // check runs through (r,c) only (fast local check, not full grid scan)
+  function runsOkAt(blocks, r, c) {
+    // horizontal run through (r,c)
+    let left = c, right = c;
+    while (white(blocks, r, left - 1)) left--;
+    while (white(blocks, r, right + 1)) right++;
+    const hLen = right - left + 1;
+    if (hLen > 0 && hLen < minLen) return false;
+    // vertical run through (r,c)
+    let top = r, bot = r;
+    while (white(blocks, top - 1, c)) top--;
+    while (white(blocks, bot + 1, c)) bot++;
+    const vLen = bot - top + 1;
+    if (vLen > 0 && vLen < minLen) return false;
     return true;
   }
 
-  function connected(blocks) {
-    let start = null, total = 0;
-    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++)
-      if (white(blocks, r, c)) { total++; if (!start) start = [r, c]; }
-    if (!start) return false;
-    const seen = new Set([key(start[0], start[1])]);
-    const q = [start];
-    let count = 0;
-    while (q.length) {
-      const [r, c] = q.pop(); count++;
-      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nr = r + dr, nc = c + dc, k = key(nr, nc);
-        if (white(blocks, nr, nc) && !seen.has(k)) { seen.add(k); q.push([nr, nc]); }
-      }
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const blocks = new Set();
+    let tries = 0;
+    while (blocks.size < nBlocks && tries < 500) {
+      tries++;
+      const r = (Math.random() * size) | 0, c = (Math.random() * size) | 0;
+      const k = key(r, c);
+      if (blocks.has(k)) continue;
+      blocks.add(k);
+      if (!runsOkAt(blocks, r, c)) blocks.delete(k);
     }
-    return count === total;
-  }
-
-  const okSoFar = blocks => runsMinOK(blocks) && connected(blocks);
-
-  function findLongRun(blocks) {
-    for (let r = 0; r < size; r++) for (let c = 0; c < size;) {
+    // split any run longer than maxLen
+    let ok = true;
+    for (let r = 0; r < size && ok; r++) for (let c = 0; c < size && ok;) {
       if (white(blocks, r, c) && !white(blocks, r, c - 1)) {
         let L = 0; while (white(blocks, r, c + L)) L++;
-        if (L > maxLen) return { r, c, d: "A", len: L };
+        if (L > maxLen) {
+          const mid = c + (L >> 1);
+          blocks.add(key(r, mid));
+          if (!runsOkAt(blocks, r, mid)) { ok = false; break; }
+        }
         c += L;
       } else c++;
     }
-    for (let c = 0; c < size; c++) for (let r = 0; r < size;) {
+    for (let c = 0; c < size && ok; c++) for (let r = 0; r < size && ok;) {
       if (white(blocks, r, c) && !white(blocks, r - 1, c)) {
         let L = 0; while (white(blocks, r + L, c)) L++;
-        if (L > maxLen) return { r, c, d: "D", len: L };
+        if (L > maxLen) {
+          const mid = r + (L >> 1);
+          blocks.add(key(mid, c));
+          if (!runsOkAt(blocks, mid, c)) { ok = false; break; }
+        }
         r += L;
       } else r++;
     }
-    return null;
-  }
-
-  // split any run longer than maxLen with an extra symmetric block pair
-  function fixLongRuns(blocks) {
-    for (let iter = 0; iter < 60; iter++) {
-      const run = findLongRun(blocks);
-      if (!run) return true;
-      const dr = run.d === "D" ? 1 : 0, dc = run.d === "A" ? 1 : 0;
-      const tries = [];
-      for (let k = minLen; k <= run.len - minLen - 1; k++) tries.push(k);
-      tries.sort((a, b) => Math.abs(a - run.len / 2) - Math.abs(b - run.len / 2));
-      let done = false;
-      for (const k of tries) {
-        const br = run.r + dr * k, bc = run.c + dc * k;
-        const k1 = key(br, bc), k2 = key(size - 1 - br, size - 1 - bc);
-        if (blocks.has(k1)) continue;
-        blocks.add(k1); blocks.add(k2);
-        if (okSoFar(blocks)) { done = true; break; }
-        blocks.delete(k1);
-        if (k2 !== k1) blocks.delete(k2);
-      }
-      if (!done) return false;
-    }
-    return false;
-  }
-
-  for (let attempt = 0; attempt < 300; attempt++) {
-    const blocks = new Set();
-    let tries = 0;
-    while (blocks.size < nBlocks && tries < 3000) {
-      tries++;
-      const r = (Math.random() * size) | 0, c = (Math.random() * size) | 0;
-      const k1 = key(r, c), k2 = key(size - 1 - r, size - 1 - c);
-      if (blocks.has(k1)) continue;
-      blocks.add(k1); blocks.add(k2);
-      if (!okSoFar(blocks)) { blocks.delete(k1); if (k2 !== k1) blocks.delete(k2); }
-    }
-    if (blocks.size >= Math.min(4, nBlocks) && fixLongRuns(blocks)) return blocks;
+    if (ok && blocks.size > 0) return blocks;
   }
   return null;
 }
@@ -308,17 +321,21 @@ function fillSlots(slots) {
   return placed;
 }
 
+// Fill predetermined slots with dictionary words honoring crossings.
+// Greedy random sampling; returns null if a slot can't be filled (retry).
 /* ---------------- dispatcher ---------------- */
 
 function buildPuzzle(diffKey, mode) {
   const d = DIFFS[diffKey] || DIFFS.medium;
   if (mode === "plates") {
     // license plates: dense book-style grid (codes are generated to fit,
-    // so the dense fill is trivial and fast)
+    // so the dense fill is trivial and fast). Slot lengths are capped just
+    // below the grid size so no slot spans the entire board.
     const minLen = FILL_MINLEN[diffKey] || 3;
+    const maxLen = d.size - 2;
     for (const nb of [FILL_BLOCKS[diffKey] || 24, 12, 6, 0]) {
       for (let t = 0; t < 10; t++) {
-        const blocks = carveBlocks(d.size, nb, minLen, d.size);
+        const blocks = carveBlocks(d.size, nb, minLen, maxLen);
         if (!blocks) continue;
         const slots = slotsFromBlocks(blocks, d.size, minLen);
         if (slots.length < 8) continue;
@@ -333,20 +350,33 @@ function buildPuzzle(diffKey, mode) {
     }
     return null;
   }
-  // crosswords and word fill-ins: sparse generator with the no-touch rule.
-  // (Dense WORD grids are a hard CSP that won't solve reliably in-browser;
-  // the dense book-style experience lives in plates mode.)
-  // Fill-ins get a higher target for a denser feel than crosswords.
+  // crosswords and word fill-ins: word-first generator (black squares are
+  // just uncovered cells, so the fill is solvable by construction).
+  // Fill-ins cram in short words (3-6 letters) for book-style density.
   const cfg = {
-    size: d.size, minLen: d.minLen, maxLen: d.maxLen,
-    target: mode === "fill" ? d.target * 2 : d.target,
+    size: d.size,
+    minLen: mode === "fill" ? 3 : d.minLen,
+    maxLen: mode === "fill" ? Math.min(9, d.maxLen + 2) : d.maxLen,
+    target: mode === "fill" ? d.target * 3 : d.target,
+    needDefs: mode === "cross",
   };
-  let best = null, bestWhite = 0;
-  for (let t = 0; t < 8; t++) {
+  // A length bucket with a single slot is a forced placement (trivially easy),
+  // so prefer puzzles where every length appears at least twice.
+  function goodDistribution(slots) {
+    const byLen = {};
+    for (const s of slots) byLen[s.len] = (byLen[s.len] || 0) + 1;
+    return Object.values(byLen).every(n => n >= 2);
+  }
+  let best = null, bestScore = -1;
+  // fill-ins use fewer tries for mobile-friendly speed; crosswords keep 8
+  // for quality (they're sparser and faster to generate)
+  const tries = mode === "fill" ? 5 : 8;
+  for (let t = 0; t < tries; t++) {
     const p = generateCrossword(cfg);
     if (p) {
       const white = Object.keys(p.cells).length;
-      if (white > bestWhite) { bestWhite = white; best = p; }
+      const score = white + (goodDistribution(p.slots) ? 100000 : 0);
+      if (score > bestScore) { bestScore = score; best = p; }
     }
   }
   return best;
@@ -371,7 +401,14 @@ function buildMaps() {
 }
 
 function newState(mode, diff) {
-  const puz = buildPuzzle(diff, mode);
+  let puz = null;
+  // buildPuzzle can rarely return null (generation failed); retry instead
+  // of crashing on a null puzzle
+  for (let t = 0; t < 5 && !puz; t++) puz = buildPuzzle(diff, mode);
+  if (!puz) {
+    setStatus("Couldn't generate a puzzle. Try again.");
+    return;
+  }
   S = { mode, diff, puz, filled: {}, revealed: [], sel: null, armed: null };
   buildMaps();
   save();
@@ -766,6 +803,10 @@ function init() {
   wireGrid();
   wireControls();
   renderAll();
+  // Warm the word index cache in the background so the first fill-in
+  // generation doesn't pay the build cost (was causing the "easy/medium
+  // slow on first try" perception; the index is shared across difficulties)
+  setTimeout(() => { try { buildIndex(3, 6, false); } catch (e) {} }, 100);
 }
 
 document.addEventListener("DOMContentLoaded", init);

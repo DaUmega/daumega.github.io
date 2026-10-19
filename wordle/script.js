@@ -1,4 +1,5 @@
-/* Wordle: guess the hidden word. Needs WORDS global from ../words.js.
+/* Wordle: guess the hidden word. Needs WORDS and WORDLE_ANSWER_COUNTS
+   globals from ../words-wordle.js (curated common words).
    Difficulty = word length. Progress in localStorage only. */
 
 const DIFFS = {
@@ -7,6 +8,11 @@ const DIFFS = {
   hard:    { len: 6, rows: 6 },
   extreme: { len: 7, rows: 5 },
 };
+
+// words-wordle.js has WORDS (answers first, then allowed guesses) and
+// WORDLE_ANSWER_COUNTS (number of answers per length). Answers are picked
+// from the curated prefix so they stay guessable; the full list validates
+// guesses.
 
 const LSKEY = "daumega.wordle.v1";
 const $ = id => document.getElementById(id);
@@ -20,7 +26,9 @@ function wordList(len) {
 function newState(diff) {
   const cfg = DIFFS[diff] || DIFFS.medium;
   const list = wordList(cfg.len);
-  const answer = list[(Math.random() * list.length) | 0];
+  // pick answer from the common-word prefix; full list validates guesses
+  const pool = list.slice(0, WORDLE_ANSWER_COUNTS[cfg.len] || list.length);
+  const answer = pool[(Math.random() * pool.length) | 0];
   S = { diff, len: cfg.len, rows: cfg.rows, answer,
         guesses: [], cur: "", done: false, won: false };
   save();
@@ -172,11 +180,16 @@ function renderKbd() {
 }
 
 /* --- wiring --- */
+function inProgress() { return S && (S.guesses.length > 0 || S.cur.length > 0); }
+function confirmNew() {
+  return !inProgress() || confirm("Start a new word? Current progress will be lost.");
+}
+
 function init() {
   $("goBackBtn").addEventListener("click", () => location.href = "../index.html");
   document.querySelectorAll("#diffSeg button").forEach(b =>
-    b.addEventListener("click", () => newState(b.dataset.diff)));
-  $("newBtn").addEventListener("click", () => newState(S ? S.diff : "medium"));
+    b.addEventListener("click", () => { if (b.dataset.diff !== S.diff && confirmNew()) newState(b.dataset.diff); }));
+  $("newBtn").addEventListener("click", () => { if (confirmNew()) newState(S ? S.diff : "medium"); });
   document.addEventListener("keydown", e => {
     if (e.key === "Enter") pressKey("enter");
     else if (e.key === "Backspace") pressKey("back");
