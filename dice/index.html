@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dice Roller</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Dice Roller</h1>
+    <p class="sub">Tap a die below to add it. Tap a die in the pool to remove it. Then roll them all.</p>
+  </div>
+
+  <div class="addbar" id="addBar"></div>
+
+  <div class="pool" id="pool"></div>
+
+  <div class="controls">
+    <button id="rollBtn" class="primary">Roll</button>
+    <button id="clearBtn">Clear</button>
+    <span class="total" id="total"></span>
+  </div>
+  <p class="status" id="status"></p>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

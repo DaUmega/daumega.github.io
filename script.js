@@ -6,6 +6,7 @@ const tools = [
 ];
 
 const games = [
+  { name: "Dice Roller", desc: "Roll any combo of d4-d100 dice. Tap to add/remove, Space to roll. Pool saves locally.", link: "dice/index.html"},
   { name: "Crosswords & Fill-ins", desc: "In-browser crossword and fill-in puzzles with difficulty levels and license-plate fill-ins. Progress saves locally.", link: "crosswords/index.html" },
   { name: "Sudoku", desc: "In-browser Sudoku with 4 difficulty levels, guaranteed unique solutions, and hint/check tools. Progress saves locally.", link: "sudoku/index.html"},
   { name: "Wordle", desc: "Guess the hidden word in 6 tries. 4 difficulty levels by word length, keyboard included. Progress saves locally.", link: "wordle/index.html"},
