@@ -1,61 +1,33 @@
 # DaUmega Resources
 
-This repository contains a growing collection of small, privacy-friendly web apps and utilities I’ve built, along with security-focused writeups.
+Small, privacy-friendly web apps and security writeups.
 
-All tools are:
-- **Free and open source**
-- **No accounts, no ads, no tracking**
-- **No data collection**
-- **Desktop and mobile friendly**
+- Free and open source
+- No accounts, no ads, no tracking
+- Desktop and mobile friendly
 
-🌐 Live site: https://daumega.github.io/
+🌐 https://daumega.github.io/
 
 ---
 
 ## Tools
 
-This repository hosts a variety of independent tools, including (but not limited to):
+Calculators, planners, data viz, privacy tools, P2P apps, games, and frontend demos.
 
-- Calculators and planners  
-- Data visualization utilities  
-- Privacy-focused personal tools  
-- Peer-to-peer web apps  
-- Game-related utilities  
-- Frontend-only demos and prototypes  
-
-New tools may be added, improved, or retired over time.
-
-For the most up-to-date list, browse the repository folders or visit the live site.
-
----
+New tools added over time. Browse the folders or visit the live site for the full list.
 
 ## Writeups
 
-The site also includes a **Writeups** section for HTB, CTF, and other offensive security related writeups.
-
----
+HTB, CTF, and offensive security writeups.
 
 ## Philosophy
 
-These tools are intentionally:
-- Minimal
-- Fast
-- Easy to understand
-- Easy to self-host or fork
-
-Most projects favor simplicity over features and avoid unnecessary dependencies.
-
----
+Minimal, fast, easy to understand, easy to fork. Simplicity over features, no unnecessary dependencies.
 
 ## Contributing
 
-Contributions, suggestions, and bug reports are welcome.
-
-- Open an issue for feedback or ideas  
-- Submit a pull request for fixes or improvements  
-
----
+Issues and pull requests welcome.
 
 ## License
 
-MIT License
+MIT
