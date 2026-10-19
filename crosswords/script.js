@@ -719,29 +719,44 @@ function wireGrid() {
 
 function inProgress() { return Object.keys(S.filled).length > 0; }
 
-function confirmNew() {
-  return !inProgress() || confirm("Start a new puzzle? Current progress will be lost.");
+// Div-based confirm (browsers block window.confirm popups)
+let modalResolve = null;
+function uiConfirm(msg) {
+  return new Promise(res => {
+    modalResolve = res;
+    $("modalMsg").textContent = msg;
+    $("modal").classList.remove("hidden");
+  });
+}
+function initModal() {
+  $("modalYes").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(true); });
+  $("modalNo").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(false); });
+}
+
+async function confirmNew() {
+  if (!inProgress()) return true;
+  return await uiConfirm("Start a new puzzle? Current progress will be lost.");
 }
 
 function wireControls() {
   $("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
   document.querySelectorAll("#modeSeg button").forEach(b =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", async () => {
       const m = b.dataset.mode;
       if (m === S.mode) return;
-      if (!confirmNew()) return;
+      if (!(await confirmNew())) return;
       newState(m, S.diff);
       renderAll();
     }));
   document.querySelectorAll("#diffSeg button").forEach(b =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", async () => {
       if (b.dataset.diff === S.diff) return;
-      if (!confirmNew()) return;
+      if (!(await confirmNew())) return;
       newState(S.mode, b.dataset.diff);
       renderAll();
     }));
-  $("newBtn").addEventListener("click", () => {
-    if (!confirmNew()) return;
+  $("newBtn").addEventListener("click", async () => {
+    if (!(await confirmNew())) return;
     newState(S.mode, S.diff);
     renderAll();
   });
@@ -773,11 +788,11 @@ function wireControls() {
     const s = activeSlot();
     if (s) reveal(slotKeys(s));
   });
-  $("revealAllBtn").addEventListener("click", () => {
-    if (confirm("Reveal the whole puzzle?")) reveal(Object.keys(S.puz.cells));
+  $("revealAllBtn").addEventListener("click", async () => {
+    if (await uiConfirm("Reveal the whole puzzle?")) reveal(Object.keys(S.puz.cells));
   });
-  $("clearBtn").addEventListener("click", () => {
-    if (!confirm("Clear your letters? Revealed letters stay.")) return;
+  $("clearBtn").addEventListener("click", async () => {
+    if (!(await uiConfirm("Clear your letters? Revealed letters stay."))) return;
     for (const k of Object.keys(S.filled)) if (!isRevealed(k)) delete S.filled[k];
     renderAll();
     save();
@@ -802,6 +817,7 @@ function init() {
   }
   wireGrid();
   wireControls();
+  initModal();
   renderAll();
   // Warm the word index cache in the background so the first fill-in
   // generation doesn't pay the build cost (was causing the "easy/medium

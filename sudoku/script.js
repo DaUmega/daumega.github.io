@@ -245,16 +245,33 @@ function doHint() {
 
 function doClear() {
   if (!S.filled.some(v => v)) return;
-  if (!confirm("Clear all your entries?")) return;
-  S.filled = new Array(81).fill(0);
-  clearErr();
-  save();
-  render();
-  setStatus("Cleared. Fresh start.");
+  uiConfirm("Clear all your entries?").then(ok => {
+    if (!ok) return;
+    S.filled = new Array(81).fill(0);
+    clearErr();
+    save();
+    render();
+    setStatus("Cleared. Fresh start.");
+  });
 }
 
-function confirmNew() {
-  return !S.filled.some(v => v) || confirm("Start a new puzzle? Progress will be lost.");
+// Div-based confirm (browsers block window.confirm popups)
+let modalResolve = null;
+function uiConfirm(msg) {
+  return new Promise(res => {
+    modalResolve = res;
+    $("modalMsg").textContent = msg;
+    $("modal").classList.remove("hidden");
+  });
+}
+function initModal() {
+  $("modalYes").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(true); });
+  $("modalNo").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(false); });
+}
+
+async function confirmNew() {
+  if (!S.filled.some(v => v)) return true;
+  return await uiConfirm("Start a new puzzle? Progress will be lost.");
 }
 
 function init() {
@@ -262,11 +279,12 @@ function init() {
   buildPad();
   $("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
   document.querySelectorAll("#diffSeg button").forEach(b =>
-    b.addEventListener("click", () => {
-      if (b.dataset.diff === S.diff || !confirmNew()) return;
+    b.addEventListener("click", async () => {
+      if (b.dataset.diff === S.diff) return;
+      if (!(await confirmNew())) return;
       newState(b.dataset.diff);
     }));
-  $("newBtn").addEventListener("click", () => { if (confirmNew()) newState(S.diff); });
+  $("newBtn").addEventListener("click", async () => { if (await confirmNew()) newState(S.diff); });
   $("checkBtn").addEventListener("click", doCheck);
   $("hintBtn").addEventListener("click", doHint);
   $("clearBtn").addEventListener("click", doClear);
@@ -283,6 +301,7 @@ function init() {
   });
   if (load()) renderAll();
   else newState("medium");
+  initModal();
 }
 
 document.addEventListener("DOMContentLoaded", init);

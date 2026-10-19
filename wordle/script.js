@@ -181,15 +181,32 @@ function renderKbd() {
 
 /* --- wiring --- */
 function inProgress() { return S && (S.guesses.length > 0 || S.cur.length > 0); }
-function confirmNew() {
-  return !inProgress() || confirm("Start a new word? Current progress will be lost.");
+
+// Div-based confirm (browsers block window.confirm popups)
+let modalResolve = null;
+function uiConfirm(msg) {
+  return new Promise(res => {
+    modalResolve = res;
+    $("modalMsg").textContent = msg;
+    $("modal").classList.remove("hidden");
+  });
+}
+function initModal() {
+  $("modalYes").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(true); });
+  $("modalNo").addEventListener("click", () => { $("modal").classList.add("hidden"); if (modalResolve) modalResolve(false); });
+}
+
+async function confirmNew() {
+  if (!inProgress()) return true;
+  return await uiConfirm("Start a new word? Current progress will be lost.");
 }
 
 function init() {
   $("goBackBtn").addEventListener("click", () => location.href = "../index.html");
   document.querySelectorAll("#diffSeg button").forEach(b =>
-    b.addEventListener("click", () => { if (b.dataset.diff !== S.diff && confirmNew()) newState(b.dataset.diff); }));
-  $("newBtn").addEventListener("click", () => { if (confirmNew()) newState(S ? S.diff : "medium"); });
+    b.addEventListener("click", async () => { if (b.dataset.diff !== S.diff && await confirmNew()) newState(b.dataset.diff); }));
+  $("newBtn").addEventListener("click", async () => { if (await confirmNew()) newState(S ? S.diff : "medium"); });
+  initModal();
   document.addEventListener("keydown", e => {
     if (e.key === "Enter") pressKey("enter");
     else if (e.key === "Backspace") pressKey("back");
