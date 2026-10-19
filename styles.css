@@ -32,7 +32,7 @@ header h1 { font-family: var(--disp); font-size: clamp(2rem, 6vw, 3rem); font-we
 .tab.active { color: #fff; border-color: rgba(6,182,212,.5); background: rgba(6,182,212,.08); }
 
 /* Grid */
-main#toolList { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; padding: 1.5rem; max-width: 52rem; margin: 0 auto; width: 100%; flex: 1; }
+main#toolList, main#gameList { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; padding: 1.5rem; max-width: 52rem; margin: 0 auto; width: 100%; flex: 1; }
 
 /* Cards */
 .card { background: var(--surf); border: 1px solid var(--border); border-radius: .875rem; padding: 1.5rem; display: flex; flex-direction: column; transition: border-color .2s, transform .2s, box-shadow .2s; }
