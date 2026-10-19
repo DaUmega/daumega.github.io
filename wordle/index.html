@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wordle</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Wordle</h1>
+    <p class="sub">Guess the hidden word. Green = right spot, yellow = wrong spot, gray = not in the word.</p>
+    <div class="controls">
+      <div class="seg" id="diffSeg" role="tablist" aria-label="difficulty">
+        <button data-diff="easy">Easy</button>
+        <button data-diff="medium" class="on">Medium</button>
+        <button data-diff="hard">Hard</button>
+        <button data-diff="extreme">Extreme</button>
+      </div>
+      <button id="newBtn" class="primary">New word</button>
+    </div>
+  </div>
+
+  <div class="board-wrap">
+    <div class="board-col">
+      <div class="wordle" id="board" role="grid" aria-label="wordle board"></div>
+      <p class="status" id="status"></p>
+    </div>
+    <div class="side-col">
+      <div class="kbd" id="kbd"></div>
+    </div>
+  </div>
+
+  <script src="../words.js" defer></script>
+  <script src="script.js" defer></script>
+</body>
+</html>
