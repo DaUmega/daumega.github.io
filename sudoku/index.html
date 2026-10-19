@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sudoku</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Sudoku</h1>
+    <p class="sub">Fresh puzzle generated in your browser every time. Progress saves locally, nothing leaves your device.</p>
+    <div class="controls">
+      <div class="seg" id="diffSeg" role="tablist" aria-label="difficulty">
+        <button data-diff="easy">Easy</button>
+        <button data-diff="medium" class="on">Medium</button>
+        <button data-diff="hard">Hard</button>
+        <button data-diff="extreme">Extreme</button>
+      </div>
+      <button id="newBtn" class="primary">New puzzle</button>
+    </div>
+  </div>
+
+  <div class="board-wrap">
+    <div class="board-col">
+      <div class="sudoku" id="grid" role="grid" aria-label="sudoku grid"></div>
+      <p class="status" id="status"></p>
+    </div>
+    <div class="side-col">
+      <div class="numpad" id="numpad"></div>
+      <div class="actions">
+        <button id="checkBtn">Check</button>
+        <button id="hintBtn">Hint</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

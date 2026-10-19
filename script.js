@@ -4,6 +4,7 @@ const tools = [
   { name: "Loan Calculator",      desc: "Calculate payments, interest, and amortization schedules with optional extra payments.",                             link: "loanCalculator/index.html" },
   { name: "P2PChat",             desc: "Encrypted peer-to-peer chatroom, file sharing, video streaming. No data saved anywhere.",                             link: "https://peerlive.duckdns.org" },
   { name: "Crosswords & Fill-ins", desc: "In-browser crossword and fill-in puzzles with difficulty levels and license-plate fill-ins. Progress saves locally.", link: "crosswords/index.html" },
+  { name: "Sudoku", desc: "In-browser Sudoku with 4 difficulty levels, guaranteed unique solutions, and hint/check tools. Progress saves locally.", link: "sudoku/index.html"},
 ];
 
 const list = document.getElementById("toolList");
