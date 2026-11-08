@@ -1,4 +1,4 @@
-/* Dice roller: pool of d4-d100, roll all, tap a die to remove it.
+/* Dice roller: pool of d4-d100, hold dice between rolls, tap held dice to remove.
    d6 renders pips, others show the number. Progress in localStorage only. */
 
 const SIDES = [4, 6, 8, 10, 12, 20, 100];
@@ -26,13 +26,31 @@ function load() {
   return false;
 }
 
-function addDie(sides) { S.dice.push({ sides, value: 0 }); save(); renderAll(); }
-function removeDie(i) { S.dice.splice(i, 1); save(); renderAll(); }
+function addDie(sides) { S.dice.push({ sides, value: 0, held: false, removeOnRoll: false }); save(); renderAll(); }
+function toggleDieState(i) {
+  const die = S.dice[i];
+  if (die.removeOnRoll) {
+    die.held = false;
+    die.removeOnRoll = false;
+  } else if (die.held) {
+    die.removeOnRoll = true;
+  } else {
+    die.held = true;
+  }
+  save(); renderAll();
+}
 function clearDice() { S.dice = []; save(); renderAll(); }
 
 function roll() {
   if (!S.dice.length) { setStatus("Add some dice first."); return; }
-  S.dice.forEach(d => d.value = 1 + ((Math.random() * d.sides) | 0));
+  S.dice = S.dice.filter(d => !d.removeOnRoll);
+  const rollable = S.dice.filter(d => !d.held);
+  if (!rollable.length) {
+    setStatus(S.dice.length ? "All dice are held." : "");
+    save(); renderAll();
+    return;
+  }
+  rollable.forEach(d => d.value = 1 + ((Math.random() * d.sides) | 0));
   setStatus("");
   save(); renderAll();
 }
@@ -41,8 +59,11 @@ function setStatus(m) { $("status").textContent = m; }
 
 function dieEl(d, i) {
   const el = document.createElement("button");
-  el.className = "die";
-  el.title = "d" + d.sides + " — tap to remove";
+  el.className = "die" + (d.held ? " held" : "") + (d.removeOnRoll ? " remove-on-roll" : "");
+  const action = d.removeOnRoll ? "marked for removal on next roll; click to unhold" :
+    d.held ? "held; click to mark for removal" : "click to hold";
+  el.title = "d" + d.sides + " - " + action;
+  el.setAttribute("aria-label", "d" + d.sides + ", " + action);
   if (d.sides === 6 && d.value) {
     const g = document.createElement("span");
     g.className = "pips";
@@ -56,7 +77,7 @@ function dieEl(d, i) {
     el.innerHTML = '<span class="dval">' + (d.value || "&ndash;") +
       '</span><span class="dtag">d' + d.sides + "</span>";
   }
-  el.addEventListener("click", () => removeDie(i));
+  el.addEventListener("click", () => toggleDieState(i));
   return el;
 }
 
