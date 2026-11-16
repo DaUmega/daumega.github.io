@@ -397,32 +397,14 @@ citySearch.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!event.target.closest(".search-wrap")) hideSearchResults();
 });
-document.getElementById("exportBtn").addEventListener("click", async () => {
+document.getElementById("exportBtn").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  try {
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: "travel-tracker.json",
-        types: [{ description: "JSON file", accept: { "application/json": [".json"] } }]
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      showMessage("Travel data exported.");
-      return;
-    }
-    const filename = window.prompt("Save travel data as:", "travel-tracker.json");
-    if (!filename) return;
-    const safeName = filename.replace(/[\\/:*?"<>|]/g, "-").trim() || "travel-tracker.json";
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = safeName.endsWith(".json") ? safeName : `${safeName}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) {
-    if (error.name !== "AbortError") showMessage("Could not export travel data.", true);
-  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "travel-tracker.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 const importFile = document.getElementById("importFile");
 document.getElementById("importBtn").addEventListener("click", () => importFile.click());
