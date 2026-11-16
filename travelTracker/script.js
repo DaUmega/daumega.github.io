@@ -14,13 +14,10 @@ const regionModeBtn = document.getElementById("regionMode");
 const mapStatus = document.getElementById("mapStatus");
 const placeTitle = document.getElementById("placeTitle");
 const placeHint = document.getElementById("placeHint");
-const countryActions = document.getElementById("countryActions");
-const visitCountryBtn = document.getElementById("visitCountryBtn");
 const citySection = document.getElementById("citySection");
 const citySearch = document.getElementById("citySearch");
 const cityResults = document.getElementById("cityResults");
 const cityList = document.getElementById("cityList");
-const regionList = document.getElementById("regionList");
 const messageEl = document.getElementById("message");
 
 let data = loadData();
@@ -28,7 +25,6 @@ let countriesLayer;
 let regionsLayer;
 let markersLayer = L.layerGroup().addTo(map);
 let selectedCountry = null;
-let selectedRegion = null;
 let mode = "country";
 let searchTimer;
 let requestId = 0;
@@ -38,12 +34,31 @@ let lastSearchAt = 0;
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved && saved.version === 1 && saved.places && typeof saved.places === "object"
-      ? saved
-      : { version: 1, places: {} };
+    if (!saved || saved.version !== 1 || !saved.places || typeof saved.places !== "object") return { version: 1, places: {} };
+    return normalizeData(saved);
   } catch {
     return { version: 1, places: {} };
   }
+}
+
+function normalizeData(saved) {
+  const places = {};
+  Object.entries(saved.places).forEach(([code, place]) => {
+    if (!place || !Array.isArray(place.cities) || !place.cities.length) return;
+    places[code] = {
+      name: String(place.name || code),
+      cities: place.cities.filter(city => city && Number.isFinite(Number(city.lat)) && Number.isFinite(Number(city.lon)))
+        .map(city => ({
+          id: String(city.id || `${city.lat},${city.lon}`),
+          name: String(city.name || "Unnamed city"),
+          regionName: String(city.regionName || city.detail?.split(",")[0] || "").trim(),
+          detail: String(city.detail || ""),
+          lat: Number(city.lat),
+          lon: Number(city.lon)
+        }))
+    };
+  });
+  return { version: 1, places };
 }
 
 function saveData() {
@@ -73,18 +88,26 @@ function countryProps(feature) {
 
 function ensurePlace(country) {
   if (!data.places[country.code]) {
-    data.places[country.code] = { name: country.name, regions: {}, cities: [] };
+    data.places[country.code] = { name: country.name, cities: [] };
   }
   return data.places[country.code];
 }
 
 function visitCount() {
-  return Object.values(data.places).filter(place => place.visited).length;
+  return Object.values(data.places).filter(place => place.cities.length > 0).length;
+}
+
+function regionKey(name) {
+  return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+function visitedRegionCount(place) {
+  return new Set((place?.cities || []).map(city => regionKey(city.regionName)).filter(Boolean)).size;
 }
 
 function featureStyle(feature) {
   const country = countryProps(feature);
-  const visited = Boolean(data.places[country.code]?.visited);
+  const visited = Boolean(data.places[country.code]?.cities.length);
   const selected = selectedCountry?.code === country.code;
   return {
     color: selected ? "#ffffff" : visited ? "#167b61" : "#8a9baa",
@@ -124,11 +147,9 @@ function selectCountry(country, feature = null) {
     return;
   }
   selectedCountry = country;
-  selectedRegion = null;
   regionModeBtn.disabled = false;
   placeTitle.textContent = country.name;
-  placeHint.textContent = "Add cities, mark the country visited, or switch to states / provinces.";
-  countryActions.hidden = false;
+  placeHint.textContent = "Add or remove cities to update visited countries and regions.";
   citySection.hidden = false;
   citySearch.value = "";
   hideSearchResults();
@@ -161,7 +182,6 @@ async function loadRegions() {
       onEachFeature(feature, layer) {
         const region = regionProps(feature);
         layer.bindTooltip(region.name, { sticky: true });
-        layer.on("click", () => toggleRegion(region));
       }
     }).addTo(map);
     if (regionsLayer.getBounds().isValid()) map.fitBounds(regionsLayer.getBounds(), { padding: [20, 20], maxZoom: 6 });
@@ -184,24 +204,14 @@ function regionProps(feature) {
 
 function regionStyle(feature) {
   const region = regionProps(feature);
-  const regions = data.places[selectedCountry?.code]?.regions || {};
-  const visited = Boolean(regions[region.id]);
-  const selected = selectedRegion?.id === region.id;
+  const cities = data.places[selectedCountry?.code]?.cities || [];
+  const visited = cities.some(city => regionKey(city.regionName) === regionKey(region.name));
   return {
-    color: selected ? "#fff" : visited ? "#167b61" : "#718395",
-    weight: selected ? 2 : 1,
-    fillColor: visited ? "#34d399" : selected ? "#28b6c8" : "#9fb5bb",
-    fillOpacity: visited ? 0.75 : selected ? 0.6 : 0.28
+    color: visited ? "#167b61" : "#718395",
+    weight: visited ? 1.5 : 1,
+    fillColor: visited ? "#34d399" : "#9fb5bb",
+    fillOpacity: visited ? 0.75 : 0.28
   };
-}
-
-function toggleRegion(region) {
-  if (!selectedCountry) return;
-  const place = ensurePlace(selectedCountry);
-  if (place.regions[region.id]) delete place.regions[region.id];
-  else place.regions[region.id] = { name: region.name };
-  selectedRegion = region;
-  saveData();
 }
 
 function setMode(nextMode) {
@@ -224,14 +234,21 @@ function setMode(nextMode) {
 function addCity(result) {
   if (!selectedCountry) return;
   const place = ensurePlace(selectedCountry);
+  const regionName = result.address?.state || result.address?.province || result.address?.state_district || "";
   const city = {
     id: `${result.lat},${result.lon}`,
     name: result.name,
-    detail: [result.address?.state || result.address?.province, result.address?.country].filter(Boolean).join(", "),
+    regionName,
+    detail: [regionName, result.address?.country].filter(Boolean).join(", "),
     lat: Number(result.lat),
     lon: Number(result.lon)
   };
   if (!place.cities.some(item => item.id === city.id)) place.cities.push(city);
+  else {
+    showMessage(`${city.name} is already in your visited cities.`);
+    hideSearchResults();
+    return;
+  }
   saveData();
   hideSearchResults();
   citySearch.value = "";
@@ -322,24 +339,18 @@ function render() {
   if (countriesLayer) countriesLayer.setStyle(featureStyle);
   const place = selectedCountry ? data.places[selectedCountry.code] : null;
   const cities = place?.cities || [];
-  const regions = Object.entries(place?.regions || {});
   cityList.replaceChildren();
-  regionList.replaceChildren();
   cities.forEach(city => cityList.append(makeListItem(city.name, city.detail, () => {
     place.cities = place.cities.filter(item => item.id !== city.id);
-    saveData();
-  })));
-  regions.forEach(([id, region]) => regionList.append(makeListItem(region.name, "", () => {
-    delete place.regions[id];
+    if (!place.cities.length) delete data.places[selectedCountry.code];
     saveData();
   })));
   document.getElementById("cityCount").textContent = String(cities.length);
-  document.getElementById("regionCount").textContent = String(regions.length);
   document.getElementById("emptyCities").hidden = cities.length > 0;
-  document.getElementById("emptyRegions").hidden = regions.length > 0;
-  visitCountryBtn.textContent = place?.visited ? "Country visited ✓" : "Mark country visited";
-  visitCountryBtn.classList.toggle("is-visited", Boolean(place?.visited));
-  document.getElementById("visitSummary").textContent = `${visitCount()} ${visitCount() === 1 ? "country" : "countries"} visited`;
+  const countriesVisited = visitCount();
+  const cityTotal = Object.values(data.places).reduce((total, item) => total + item.cities.length, 0);
+  const regionTotal = Object.values(data.places).reduce((total, item) => total + visitedRegionCount(item), 0);
+  document.getElementById("visitSummary").textContent = `${countriesVisited} ${countriesVisited === 1 ? "country" : "countries"} · ${cityTotal} ${cityTotal === 1 ? "city" : "cities"} · ${regionTotal} ${regionTotal === 1 ? "region" : "regions"}`;
   renderMarkers();
   if (regionsLayer) regionsLayer.setStyle(feature => regionStyle(feature));
 }
@@ -360,15 +371,8 @@ function renderMarkers() {
 
 countryModeBtn.addEventListener("click", () => setMode("country"));
 regionModeBtn.addEventListener("click", () => setMode("region"));
-visitCountryBtn.addEventListener("click", () => {
-  if (!selectedCountry) return;
-  const place = ensurePlace(selectedCountry);
-  place.visited = !place.visited;
-  saveData();
-});
 document.getElementById("worldBtn").addEventListener("click", () => {
   selectedCountry = null;
-  selectedRegion = null;
   regionModeBtn.disabled = true;
   mode = "country";
   countryModeBtn.classList.add("active");
@@ -380,7 +384,6 @@ document.getElementById("worldBtn").addEventListener("click", () => {
   countriesLayer?.setStyle(featureStyle);
   placeTitle.textContent = "Choose a country";
   placeHint.textContent = "Select a country on the map to add cities and explore its regions.";
-  countryActions.hidden = true;
   citySection.hidden = true;
   hideSearchResults();
   map.setView([22, 8], 2);
@@ -417,7 +420,7 @@ importFile.addEventListener("change", async () => {
     if (imported?.version !== 1 || !imported.places || typeof imported.places !== "object" || Array.isArray(imported.places)) {
       throw new Error("This file is not a Travel Tracker backup.");
     }
-    data = imported;
+    data = normalizeData(imported);
     saveData();
     showMessage("Travel data imported.");
   } catch (error) {
