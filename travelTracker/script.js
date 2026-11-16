@@ -131,7 +131,7 @@ async function loadCountries() {
       onEachFeature(feature, layer) {
         const country = countryProps(feature);
         layer.bindTooltip(country.name, { sticky: true, className: "map-tooltip" });
-        layer.on("click", () => selectCountry(country, feature));
+        layer.on("click", () => selectCountry(country, layer));
       }
     }).addTo(map);
     setMapStatus("");
@@ -141,7 +141,7 @@ async function loadCountries() {
   }
 }
 
-function selectCountry(country, feature = null) {
+function selectCountry(country, layer = null) {
   if (!country.code || country.code === "-99") {
     showMessage("This map boundary does not have a usable country code.", true);
     return;
@@ -153,10 +153,7 @@ function selectCountry(country, feature = null) {
   citySection.hidden = false;
   citySearch.value = "";
   hideSearchResults();
-  if (feature) {
-    const layer = countriesLayer?.getLayers().find(item => countryProps(item.feature).code === country.code);
-    if (layer) map.fitBounds(layer.getBounds(), { padding: [24, 24], maxZoom: 5 });
-  }
+  if (layer) map.fitBounds(layer.getBounds(), { padding: [24, 24], maxZoom: 5 });
   if (mode === "region") setMode("country");
   render();
 }
@@ -197,7 +194,6 @@ async function loadRegions() {
 function regionProps(feature) {
   const props = feature.properties || {};
   return {
-    id: String(props.adm1_code || props.iso_3166_2 || props.name || feature.id || ""),
     name: props.name_en || props.name || props.admin || "Unnamed region"
   };
 }
@@ -207,10 +203,10 @@ function regionStyle(feature) {
   const cities = data.places[selectedCountry?.code]?.cities || [];
   const visited = cities.some(city => regionKey(city.regionName) === regionKey(region.name));
   return {
-    color: visited ? "#167b61" : "#718395",
-    weight: visited ? 1.5 : 1,
-    fillColor: visited ? "#34d399" : "#9fb5bb",
-    fillOpacity: visited ? 0.75 : 0.28
+    color: visited ? "#064e3b" : "#718395",
+    weight: visited ? 2 : 1,
+    fillColor: visited ? "#059669" : "#9fb5bb",
+    fillOpacity: visited ? 0.95 : 0.35
   };
 }
 
@@ -401,14 +397,32 @@ citySearch.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!event.target.closest(".search-wrap")) hideSearchResults();
 });
-document.getElementById("exportBtn").addEventListener("click", () => {
+document.getElementById("exportBtn").addEventListener("click", async () => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "travel-tracker.json";
-  link.click();
-  URL.revokeObjectURL(url);
+  try {
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "travel-tracker.json",
+        types: [{ description: "JSON file", accept: { "application/json": [".json"] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      showMessage("Travel data exported.");
+      return;
+    }
+    const filename = window.prompt("Save travel data as:", "travel-tracker.json");
+    if (!filename) return;
+    const safeName = filename.replace(/[\\/:*?"<>|]/g, "-").trim() || "travel-tracker.json";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = safeName.endsWith(".json") ? safeName : `${safeName}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    if (error.name !== "AbortError") showMessage("Could not export travel data.", true);
+  }
 });
 const importFile = document.getElementById("importFile");
 document.getElementById("importBtn").addEventListener("click", () => importFile.click());
