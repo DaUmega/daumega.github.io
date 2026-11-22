@@ -51,15 +51,15 @@ button.primary {
   min-height: 44px;
 }
 button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(6,182,212,.25); }
-#flagBtn, #resetBestBtn {
+#flagBtn, #noGuessBtn, #resetBestBtn {
   padding: .45rem 1.1rem; font-family: var(--mono); font-size: .78rem; font-weight: 600;
   background: var(--surf); color: var(--text);
   border: 1px solid var(--border); border-radius: .625rem; cursor: pointer;
   transition: border-color .15s;
   min-height: 44px;
 }
-#flagBtn:hover, #resetBestBtn:hover { border-color: rgba(6,182,212,.5); }
-#flagBtn.on { color: #fff; border-color: rgba(6,182,212,.5); background: rgba(6,182,212,.08); }
+#flagBtn:hover, #noGuessBtn:hover, #resetBestBtn:hover { border-color: rgba(6,182,212,.5); }
+#flagBtn.on, #noGuessBtn.on { color: #fff; border-color: rgba(6,182,212,.5); background: rgba(6,182,212,.08); }
 
 /* HUD: classic Windows panel, grey with a raised border,
    red-on-black digital counters, and a smiley face button. */
@@ -80,23 +80,25 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
 .face:active { border-color: #7b7b7b #fff #fff #7b7b7b; }
 
 /* Board: classic Windows grey, no gaps, raised unrevealed cells,
-   flat sunken revealed cells. */
-.board-wrap { max-width: 100%; overflow-x: auto; padding-bottom: .25rem; }
+   flat sunken revealed cells. The board always fits the screen:
+   cells share the board width (1fr each), so no difficulty ever
+   overflows sideways on a phone. */
+.board-wrap { max-width: 100%; }
 .board {
   display: grid;
-  grid-template-columns: repeat(var(--cols, 9), var(--cell, 2.25rem));
-  gap: 0; width: max-content; max-width: 100%;
+  grid-template-columns: repeat(var(--cols, 9), 1fr);
+  gap: 0; width: 100%;
   padding: .5rem; background: #c0c0c0;
   border: 3px solid; border-color: #7b7b7b #fff #fff #7b7b7b;
   touch-action: manipulation;
   user-select: none; -webkit-user-select: none;
 }
-.board.cols-9  { --cell: clamp(1.9rem, 8vw, 2.5rem); }
-.board.cols-16 { --cell: clamp(1.4rem, 5.4vw, 2rem); }
-.board.cols-30 { --cell: clamp(1.05rem, 3vw, 1.7rem); }
+.board.cols-9  { max-width: 24rem; }
+.board.cols-16 { max-width: 32rem; }
+.board.cols-30 { max-width: 40rem; }
 
 .cell {
-  width: var(--cell); height: var(--cell);
+  aspect-ratio: 1;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--mono); font-size: clamp(.7rem, 2.6vw, 1rem); font-weight: 700; line-height: 1;
   background: #c0c0c0; color: #000; cursor: pointer; padding: 0;
@@ -104,6 +106,9 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
   touch-action: manipulation;
   transition: none;
 }
+.board.cols-9  .cell { font-size: clamp(.9rem, 4vw, 1.15rem); }
+.board.cols-16 .cell { font-size: clamp(.7rem, 3vw, 1rem); }
+.board.cols-30 .cell { font-size: clamp(.55rem, 2.4vw, .9rem); }
 .cell:hover { background: #c0c0c0; }
 .cell.revealed { background: #c0c0c0; border: 1px solid #808080; cursor: default; }
 .cell.revealed:hover { background: #c0c0c0; }
@@ -137,7 +142,7 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
   .controls { flex-direction: column; align-items: stretch; }
   .seg { justify-content: center; }
   .seg button { flex: 1; }
-  #flagBtn, #resetBestBtn, button.primary { width: 100%; }
+  #flagBtn, #noGuessBtn, #resetBestBtn, button.primary { width: 100%; }
   .hud { gap: .75rem; }
   .board { padding: .35rem; }
 }

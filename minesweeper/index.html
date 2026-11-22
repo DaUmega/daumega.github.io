@@ -22,6 +22,7 @@
         <button data-diff="expert">Expert</button>
       </div>
       <button id="flagBtn" aria-pressed="false">Flag mode: off</button>
+      <button id="noGuessBtn" aria-pressed="false">Guess-Free Mode: off</button>
       <button id="newBtn" class="primary">New game</button>
       <button id="resetBestBtn">Reset best</button>
     </div>
@@ -39,7 +40,7 @@
   </div>
 
   <p class="status" id="status"></p>
-  <p class="help">Left-click to reveal a cell. Right-click or long-press (about half a second) to flag it. Left+right click together, or double-click, a number to open its unflagged neighbours when the flags around it match the number. The first click is always safe.</p>
+  <p class="help">Left-click to reveal a cell. Right-click or long-press (about half a second) to flag it. Click a number to open its unflagged neighbours when the flags around it match the number. The first click is always safe. Guess-Free mode will always be solvable.</p>
 
   <script src="script.js" defer></script>
 </body>

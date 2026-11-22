@@ -60,18 +60,32 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
 
 /* Board */
 .board {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem;
+  --pad: .5rem;
+  --gap: .5rem;
+  position: relative; aspect-ratio: 1;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap);
   width: 100%; max-width: min(92vw, 480px);
-  padding: .5rem;
+  padding: var(--pad);
   background: var(--surf); border: 1px solid var(--border); border-radius: .75rem;
   touch-action: none;
   user-select: none; -webkit-user-select: none;
 }
+.bgcell {
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: .5rem;
+}
+/* A tile's position is its column and row (--c, --r), set by the
+   script. Left/top are percentages of the board, so resizing
+   needs no JS. Sliding is just the transition on left/top. */
 .tile {
-  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  position: absolute; left: calc(var(--pad) + var(--c) * (25% - var(--pad) / 2 + var(--gap) / 4));
+  top: calc(var(--pad) + var(--r) * (25% - var(--pad) / 2 + var(--gap) / 4));
+  width: calc(25% - var(--pad) / 2 - var(--gap) * .75);
+  height: calc(25% - var(--pad) / 2 - var(--gap) * .75);
+  display: flex; align-items: center; justify-content: center;
   font-family: var(--mono); font-size: clamp(1.4rem, 6vw, 2rem); font-weight: 700;
   background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: .5rem;
   color: var(--text);
+  transition: left .12s ease-in-out, top .12s ease-in-out;
 }
 .tile.long { font-size: clamp(1rem, 4.5vw, 1.5rem); }
 .tile.t2    { background: #0d1829; color: #e2e8f0; }
@@ -105,5 +119,5 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
   #goBackBtn { min-height: 44px; }
   .scores { justify-content: stretch; }
   .score-box { flex: 1; }
-  .board { gap: .35rem; padding: .35rem; }
+  .board { --pad: .35rem; --gap: .35rem; }
 }

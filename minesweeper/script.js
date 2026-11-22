@@ -1,6 +1,8 @@
 /* Minesweeper: classic difficulties, first click always safe.
    Mines are placed only after the first click, excluding that cell.
-   Best times per difficulty persist in localStorage. */
+   Best times per difficulty persist in localStorage. No guessing
+   mode retries the mine layout until the board can be solved by
+   logic alone, with no 50/50 guesses. */
 
 const DIFFS = {
   beginner:     { cols: 9,  rows: 9,  mines: 10 },
@@ -9,12 +11,14 @@ const DIFFS = {
 };
 
 const LSKEY = "daumega.minesweeper.v1";
+const NO_GUESS_TRIES = 400; /* mine layouts tried per game in No guessing mode */
 const FLAG_MARK = "\u2691"; /* plain text flag glyph, not emoji */
 const MINE_MARK = "\u2739"; /* plain text star glyph, not emoji */
 const $ = id => document.getElementById(id);
 var S = null; /* var so test harnesses can reach it */
 let timerId = null;
 let flagMode = false;
+let noGuess = false;
 
 /* --- pure game logic (no DOM, testable in Node) --- */
 
@@ -28,7 +32,7 @@ function newGameState(diff) {
   return {
     diff, cols: cfg.cols, rows: cfg.rows, mines: cfg.mines,
     cells, started: false, over: false, won: false,
-    revealedCount: 0, flags: 0, seconds: 0,
+    revealedCount: 0, flags: 0, seconds: 0, noGuessFallback: false,
   };
 }
 
@@ -45,6 +49,18 @@ function neighbours(idx, cols, rows) {
   return out;
 }
 
+function computeAdj(state) {
+  for (let i = 0; i < state.cells.length; i++) {
+    if (state.cells[i].mine) continue;
+    state.cells[i].adj = neighbours(i, state.cols, state.rows)
+      .filter(n => state.cells[n].mine).length;
+  }
+}
+
+function resetMines(state) {
+  state.cells.forEach(c => { c.mine = false; c.adj = 0; });
+}
+
 function placeMines(state, exclude) {
   const total = state.cols * state.rows;
   const pool = [];
@@ -55,11 +71,7 @@ function placeMines(state, exclude) {
     const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
   }
   for (let k = 0; k < state.mines; k++) state.cells[pool[k]].mine = true;
-  for (let i = 0; i < total; i++) {
-    if (state.cells[i].mine) continue;
-    state.cells[i].adj = neighbours(i, state.cols, state.rows)
-      .filter(n => state.cells[n].mine).length;
-  }
+  computeAdj(state);
 }
 
 function revealCell(state, idx) {
@@ -67,7 +79,8 @@ function revealCell(state, idx) {
   const cell = state.cells[idx];
   if (!cell || cell.revealed || cell.flagged) return "noop";
   if (!state.started) {
-    placeMines(state, idx);
+    if (noGuess) state.noGuessFallback = !placeGuessFree(state, idx);
+    else placeMines(state, idx);
     state.started = true;
   }
   if (cell.mine) {
@@ -133,16 +146,153 @@ function chordCell(state, idx) {
 
 function minesRemaining(state) { return state.mines - state.flags; }
 
+/* --- guess-free: a solver that plays only with logic --- */
+
+/* A copy of the board for the solver: same mines and numbers, but
+   nothing revealed and nothing flagged. The solver only ever reads
+   revealed numbers and its own flags, so anything it solves is
+   something a player could solve too, with no guessing. */
+function cloneForSolve(state) {
+  return {
+    cols: state.cols, rows: state.rows, mines: state.mines,
+    cells: state.cells.map(c => ({ mine: c.mine, revealed: false, flagged: false, adj: c.adj })),
+    revealedCount: 0, flags: 0, started: true, over: false, won: false,
+  };
+}
+
+/* One pass of the two basic rules over every revealed number: if
+   the flags around a number equal the number, the rest of its
+   neighbours are safe; if flagged plus unflagged neighbours equal
+   the number, the unflagged ones are mines. Returns true when it
+   flagged or revealed anything, "mine" when a deduction went
+   wrong (should not happen on a sound board). */
+function solveStep(sim) {
+  let moved = false;
+  for (let i = 0; i < sim.cells.length; i++) {
+    const c = sim.cells[i];
+    if (!c.revealed || c.adj === 0) continue;
+    const ns = neighbours(i, sim.cols, sim.rows);
+    const unknown = ns.filter(n => !sim.cells[n].revealed && !sim.cells[n].flagged);
+    if (!unknown.length) continue;
+    const flagged = ns.filter(n => sim.cells[n].flagged).length;
+    if (flagged === c.adj) {
+      for (const n of unknown) {
+        const r = revealCell(sim, n);
+        if (r === "mine") return "mine";
+        if (r !== "noop" && r !== "over") moved = true;
+      }
+    } else if (flagged + unknown.length === c.adj) {
+      for (const n of unknown) if (toggleFlag(sim, n)) moved = true;
+    }
+  }
+  return moved;
+}
+
+/* Subset rule: when one number's unknown neighbours are all inside
+   another's, the difference must hold the difference in mines.
+   If that difference is 0 the cells are safe, if it is all of them
+   they are mines. Catches the 1-2 style patterns the basic rules
+   cannot. Returns true when it moved, "mine" when a deduction
+   went wrong. */
+function solveSubset(sim) {
+  const numbered = [];
+  for (let i = 0; i < sim.cells.length; i++) {
+    const c = sim.cells[i];
+    if (!c.revealed || c.adj === 0) continue;
+    const ns = neighbours(i, sim.cols, sim.rows);
+    const u = new Set(ns.filter(n => !sim.cells[n].revealed && !sim.cells[n].flagged));
+    if (!u.size) continue;
+    const flagged = ns.filter(n => sim.cells[n].flagged).length;
+    numbered.push({ u, need: c.adj - flagged });
+  }
+  for (const a of numbered) {
+    for (const b of numbered) {
+      if (a === b || a.u.size >= b.u.size) continue;
+      let subset = true;
+      a.u.forEach(x => { if (!b.u.has(x)) subset = false; });
+      if (!subset) continue;
+      const diff = [...b.u].filter(x => !a.u.has(x));
+      const diffNeed = b.need - a.need;
+      if (diffNeed === 0) {
+        for (const n of diff) {
+          if (revealCell(sim, n) === "mine") return "mine";
+        }
+        return true;
+      }
+      if (diffNeed === diff.length) {
+        for (const n of diff) toggleFlag(sim, n);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/* How many safe cells the solver can reveal from the first click.
+   -1 when a deduction hits a mine (a broken board). */
+function countSolved(state, firstIdx) {
+  const sim = cloneForSolve(state);
+  if (revealCell(sim, firstIdx) === "mine") return -1;
+  const total = sim.cols * sim.rows;
+  for (let iter = 0; iter < 1000; iter++) {
+    if (sim.revealedCount === total - sim.mines) return sim.revealedCount;
+    const step = solveStep(sim);
+    if (step === "mine") return -1;
+    if (step) continue;
+    const sub = solveSubset(sim);
+    if (sub === "mine") return -1;
+    if (sub) continue;
+    return sim.revealedCount;
+  }
+  return sim.revealedCount;
+}
+
+function isSolvable(state, firstIdx) {
+  return countSolved(state, firstIdx) === state.cols * state.rows - state.mines;
+}
+
+/* Try mine layouts until the solver can finish the board from the
+   first click with logic alone. Returns true when one was found;
+   otherwise keeps the layout the solver got furthest on, so the
+   board is as close to guess-free as the tries found. */
+function placeGuessFree(state, exclude) {
+  const totalSafe = state.cols * state.rows - state.mines;
+  let best = -1, bestMines = null;
+  for (let t = 0; t < NO_GUESS_TRIES; t++) {
+    resetMines(state);
+    placeMines(state, exclude);
+    const solved = countSolved(state, exclude);
+    if (solved === totalSafe) return true;
+    if (solved > best) {
+      best = solved;
+      bestMines = state.cells.map(c => c.mine);
+    }
+  }
+  resetMines(state);
+  if (bestMines) {
+    bestMines.forEach((m, i) => { state.cells[i].mine = m; });
+    computeAdj(state);
+  } else {
+    /* every try busted, which should not happen: place once more */
+    placeMines(state, exclude);
+  }
+  return false;
+}
+
 /* --- persistence: difficulty + best times per difficulty --- */
 
 function loadSaved() {
   try {
     const d = JSON.parse(localStorage.getItem(LSKEY));
     if (d && d.best && typeof d.best === "object") {
-      return { diff: (d.diff in DIFFS) ? d.diff : "beginner", best: d.best };
+      return {
+        diff: (d.diff in DIFFS) ? d.diff : "beginner",
+        best: d.best,
+        noGuess: d.noGuess === true,
+      };
     }
   } catch (e) {}
-  return { diff: "beginner", best: { beginner: null, intermediate: null, expert: null } };
+  return { diff: "beginner", best: { beginner: null, intermediate: null, expert: null }, noGuess: false };
 }
 
 function saveBest(diff, seconds) {
@@ -151,10 +301,10 @@ function saveBest(diff, seconds) {
     const best = saved.best;
     if (best[diff] == null || seconds < best[diff]) {
       best[diff] = seconds;
-      localStorage.setItem(LSKEY, JSON.stringify({ diff, best }));
+      localStorage.setItem(LSKEY, JSON.stringify({ diff, best, noGuess: saved.noGuess }));
       return true;
     }
-    localStorage.setItem(LSKEY, JSON.stringify({ diff: saved.diff, best }));
+    localStorage.setItem(LSKEY, JSON.stringify({ diff: saved.diff, best, noGuess: saved.noGuess }));
   } catch (e) {}
   return false;
 }
@@ -162,7 +312,14 @@ function saveBest(diff, seconds) {
 function saveDiff(diff) {
   try {
     const saved = loadSaved();
-    localStorage.setItem(LSKEY, JSON.stringify({ diff, best: saved.best }));
+    localStorage.setItem(LSKEY, JSON.stringify({ diff, best: saved.best, noGuess: saved.noGuess }));
+  } catch (e) {}
+}
+
+function saveNoGuess(value) {
+  try {
+    const saved = loadSaved();
+    localStorage.setItem(LSKEY, JSON.stringify({ diff: saved.diff, best: saved.best, noGuess: value }));
   } catch (e) {}
 }
 
@@ -274,7 +431,8 @@ function handleReveal(idx) {
     endGame(true);
   } else {
     renderBoard();
-    setStatus("");
+    setStatus(S.noGuessFallback ?
+      "No fully guess-free board found, this is the closest one." : "");
   }
 }
 
@@ -323,13 +481,22 @@ function newGame(diff) {
 function resetBest() {
   if (!S) return;
   try {
+    const saved = loadSaved();
     localStorage.setItem(LSKEY, JSON.stringify({
       diff: S.diff,
       best: { beginner: null, intermediate: null, expert: null },
+      noGuess: saved.noGuess,
     }));
   } catch (e) {}
   renderBoard();
   setStatus("Best times cleared.");
+}
+
+function renderNoGuessBtn() {
+  const btn = $("noGuessBtn");
+  btn.classList.toggle("on", noGuess);
+  btn.setAttribute("aria-pressed", String(noGuess));
+  btn.textContent = "Guess-Free Mode: " + (noGuess ? "on" : "off");
 }
 
 /* --- wiring --- */
@@ -350,64 +517,89 @@ function init() {
     btn.setAttribute("aria-pressed", String(flagMode));
     btn.textContent = "Flag mode: " + (flagMode ? "on" : "off");
   });
+  $("noGuessBtn").addEventListener("click", () => {
+    noGuess = !noGuess;
+    saveNoGuess(noGuess);
+    renderNoGuessBtn();
+    newGame(S.diff);
+  });
 
   $("faceBtn").addEventListener("click", () => newGame(S.diff));
 
   const board = $("board");
-  /* Chording: left + right mouse buttons together on a revealed
-     number opens its unflagged neighbours when the flags match.
-     Double-click on a number does the same, for mice and touch. */
-  let down = new Set(), chorded = false;
-  board.addEventListener("mousedown", e => {
-    const cell = e.target.closest(".cell");
-    if (!cell) return;
-    down.add(e.button);
-    if (down.has(0) && down.has(2)) {
-      chorded = true;
-      handleChord(Number(cell.dataset.idx));
-    }
-  });
-  board.addEventListener("mouseup", () => { down.clear(); });
-  board.addEventListener("mouseleave", () => { down.clear(); });
-  board.addEventListener("dblclick", e => {
-    const cell = e.target.closest(".cell");
-    if (cell) handleChord(Number(cell.dataset.idx));
-  });
-  /* Right-click flags; suppress the browser context menu on the board.
-     If the left button is also down, this is a chord, not a flag. */
-  board.addEventListener("contextmenu", e => {
-    e.preventDefault();
-    if (down.has(0)) return;
-    const cell = e.target.closest(".cell");
-    if (cell) handleFlag(Number(cell.dataset.idx));
-  });
-  /* Long-press (about 500ms) flags / unflags, for touch */
+  /* No left+right chord handler: the browser has no left+right
+     gesture of its own, it just fires a left mousedown, a right
+     mousedown, then a left click. The click below already chords
+     a number, so left+right on a number works the same with no
+     extra code. The contextmenu check below stops the right half
+     of that press from flagging the cell. */
+  /* Long-press (about 500ms) flags / unflags, for touch.
+     Some phones fire BOTH the press timer and a contextmenu for
+     the same long press, which used to flag twice and end up
+     unmarked. One key per press, shared by both paths, makes sure
+     a press flags exactly once, and the tap that follows it is
+     ignored instead of acting on the cell. */
   let pressTimer = null;
+  let pressId = 0;
+  let flaggedKey = "";
   let longPressed = false;
+  let lastPointerType = "";
+  function flagOnce(idx, id) {
+    const key = id + ":" + idx;
+    if (key === flaggedKey) return;
+    flaggedKey = key;
+    handleFlag(idx);
+  }
   board.addEventListener("pointerdown", e => {
+    /* A new press starts here, so any leftover long-press
+       suppression from the last one is stale: on touch, a long
+       press fires a contextmenu that eats the click, so the click
+       handler never gets to clear it, and the next tap would be
+       swallowed. The long press's own click, if one fires at all,
+       always comes before the next pointerdown, so clearing here
+       cannot swallow it. */
+    longPressed = false;
     const cell = e.target.closest(".cell");
     if (!cell) return;
-    longPressed = false;
+    lastPointerType = e.pointerType || "";
+    pressId++;
+    const id = pressId, idx = Number(cell.dataset.idx);
     pressTimer = setTimeout(() => {
+      flagOnce(idx, id);
       longPressed = true;
-      handleFlag(Number(cell.dataset.idx));
     }, 500);
   });
   const cancelPress = () => { if (pressTimer !== null) { clearTimeout(pressTimer); pressTimer = null; } };
   board.addEventListener("pointerup", cancelPress);
   board.addEventListener("pointerleave", cancelPress);
   board.addEventListener("pointercancel", cancelPress);
+  /* Right-click flags; suppress the browser context menu on the board.
+     If the left button is also down (e.buttons bit 1), this is the
+     right half of a left+right press, not a flag. */
+  board.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    if (e.buttons & 1) return;
+    const cell = e.target.closest(".cell");
+    if (!cell) return;
+    flagOnce(Number(cell.dataset.idx), pressId);
+    if (lastPointerType === "touch") longPressed = true;
+  });
   board.addEventListener("click", e => {
     const cell = e.target.closest(".cell");
     if (!cell) return;
-    if (chorded) { chorded = false; return; }
     if (longPressed) { longPressed = false; return; }
     const idx = Number(cell.dataset.idx);
+    /* Click a revealed number to chord it: open its unflagged
+       neighbours when the flags around it match the number. */
+    const c = S.cells[idx];
+    if (c && c.revealed && c.adj > 0) { handleChord(idx); return; }
     if (flagMode) handleFlag(idx);
     else handleReveal(idx);
   });
 
   const saved = loadSaved();
+  noGuess = saved.noGuess === true;
+  renderNoGuessBtn();
   S = newGameState(saved.diff);
   document.querySelectorAll("#diffSeg button").forEach(b =>
     b.classList.toggle("on", b.dataset.diff === S.diff));
@@ -420,5 +612,5 @@ if (typeof document !== "undefined") {
 
 /* Node smoke-test hook: require() exposes the pure logic only */
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { DIFFS, newGameState, placeMines, neighbours, revealCell, toggleFlag, chordCell, minesRemaining };
+  module.exports = { DIFFS, newGameState, placeMines, neighbours, revealCell, toggleFlag, chordCell, minesRemaining, countSolved, isSolvable };
 }

@@ -1,12 +1,19 @@
 /* 2048: slide the tiles, merge equal neighbours.
    Board is a flat 16-cell array, row-major. Progress (board, score,
    best, game-over flag) persists in localStorage. There is no win
-   at 2048: the game only ends when no moves are left. */
+   at 2048: the game only ends when no moves are left.
+   Tiles slide instead of teleporting: each tile is positioned by
+   its column and row in CSS, so moving it is just changing those
+   two numbers and letting the transition run. A tile that spawns
+   just appears, it does not slide. */
 
 const SIZE = 4;
 const LSKEY = "daumega.2048.v1";
+const ANIM_MS = 130; /* must be just over the .tile transition in styles.css */
 const $ = id => document.getElementById(id);
 var S = null; // var so test harnesses can reach it
+let animating = false;
+let animTimer = null;
 
 function emptyBoard() { return Array(SIZE * SIZE).fill(0); }
 
@@ -46,24 +53,23 @@ function spawnRandom() {
   S.board[i] = Math.random() < 0.9 ? 2 : 4;
 }
 
-/* Slide one row left, merging each pair of equal neighbours once.
-   Returns the new row, points gained, and whether anything changed. */
-function slideRowLeft(row) {
-  const tiles = row.filter(v => v);
+/* Slide one row of tile items left, merging each pair of equal
+   neighbours once. Items are {v, src}; the output keeps, for each
+   resulting tile, the source cells it came from, so the move can
+   be animated. Returns the new row and points gained. */
+function slideItems(items) {
   const out = [];
   let gained = 0;
-  for (let i = 0; i < tiles.length; i++) {
-    if (i + 1 < tiles.length && tiles[i] === tiles[i + 1]) {
-      out.push(tiles[i] * 2);
-      gained += tiles[i] * 2;
+  for (let i = 0; i < items.length; i++) {
+    if (i + 1 < items.length && items[i].v === items[i + 1].v) {
+      out.push({ v: items[i].v * 2, srcs: [items[i].src, items[i + 1].src] });
+      gained += items[i].v * 2;
       i++;
     } else {
-      out.push(tiles[i]);
+      out.push({ v: items[i].v, srcs: [items[i].src] });
     }
   }
-  while (out.length < SIZE) out.push(0);
-  const changed = out.some((v, i) => v !== row[i]);
-  return { row: out, gained, changed };
+  return { out, gained };
 }
 
 /* Lines of cell indexes for each direction, always read in slide order. */
@@ -82,19 +88,27 @@ function linesFor(dir) {
   return lines;
 }
 
-/* Pure move: returns a new board, points gained, and whether it changed.
-   Does not spawn a tile or touch S, so tests can call it directly. */
+/* Pure move: returns a new board, points gained, whether it changed,
+   and the sources of every resulting tile ({to, srcs}) for the slide
+   animation. Does not spawn a tile or touch S, so tests can call it
+   directly. */
 function moveBoard(board, dir) {
   const next = board.slice();
   let gained = 0;
   let changed = false;
+  const sources = [];
   linesFor(dir).forEach(line => {
-    const r = slideRowLeft(line.map(i => board[i]));
-    r.row.forEach((v, j) => { next[line[j]] = v; });
+    const items = line.map(i => ({ v: board[i], src: i })).filter(t => t.v);
+    const r = slideItems(items);
+    r.out.forEach((t, j) => {
+      next[line[j]] = t.v;
+      sources.push({ to: line[j], srcs: t.srcs });
+    });
+    for (let j = r.out.length; j < SIZE; j++) next[line[j]] = 0;
     gained += r.gained;
-    if (r.changed) changed = true;
+    if (line.some(idx => next[idx] !== board[idx])) changed = true;
   });
-  return { board: next, gained, changed };
+  return { board: next, gained, changed, sources };
 }
 
 function isGameOver(board) {
@@ -108,23 +122,46 @@ function isGameOver(board) {
 }
 
 function doMove(dir) {
-  if (!S || S.over) return;
+  if (!S || S.over || animating) return;
   const r = moveBoard(S.board, dir);
   if (!r.changed) return;
+  /* Tile divs currently on the board, keyed by their cell, so the
+     animation can slide each one from where it is to where it goes. */
+  const divs = {};
+  Array.from($("board").children).forEach(el => {
+    if (el.dataset && el.dataset.idx != null) divs[el.dataset.idx] = el;
+  });
   S.board = r.board;
   S.score += r.gained;
   if (S.score > S.best) S.best = S.score;
   spawnRandom();
-  if (isGameOver(S.board)) {
-    S.over = true;
-    setStatus("Game over. Final score: " + S.score + ".");
-  } else {
-    setStatus("");
-  }
-  update();
+  if (isGameOver(S.board)) S.over = true;
+  save();
+  renderScores();
+  /* Slide: point every moving tile at its destination cell. Tiles
+     that merge slide together; the redraw below, after the slide,
+     leaves a single tile with the merged value. */
+  animating = true;
+  r.sources.forEach(s => {
+    s.srcs.forEach(src => {
+      const el = divs[src];
+      if (el) placeTile(el, s.to);
+    });
+  });
+  animTimer = setTimeout(() => {
+    animating = false;
+    animTimer = null;
+    renderAll();
+  }, ANIM_MS);
+}
+
+function cancelAnim() {
+  if (animTimer !== null) { clearTimeout(animTimer); animTimer = null; }
+  animating = false;
 }
 
 function newGame() {
+  cancelAnim();
   const best = S ? S.best : 0;
   newState(best);
   setStatus("");
@@ -133,6 +170,7 @@ function newGame() {
 /* Best score only. The current board keeps going. */
 function resetBest() {
   if (!S) return;
+  cancelAnim();
   S.best = 0;
   update();
   if (!S.over) setStatus("Best score cleared.");
@@ -140,18 +178,38 @@ function resetBest() {
 
 function setStatus(m) { $("status").textContent = m; }
 
+function renderScores() {
+  $("score").textContent = S.score;
+  $("best").textContent = S.best;
+}
+
+/* A tile's position is its column and row, as CSS variables. The
+   stylesheet turns those into left/top, so moving a tile is just
+   changing the two numbers. CSS handles resizing, no JS geometry. */
+function placeTile(el, idx) {
+  el.style.setProperty("--c", idx % SIZE);
+  el.style.setProperty("--r", (idx / SIZE) | 0);
+}
+
 function renderAll() {
   const board = $("board");
   board.innerHTML = "";
-  S.board.forEach(v => {
-    const cell = document.createElement("div");
-    cell.className = "tile" + (v ? " t" + v : " empty") + (v >= 1000 ? " long" : "");
-    cell.setAttribute("role", "gridcell");
-    cell.textContent = v || "";
-    board.appendChild(cell);
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const bg = document.createElement("div");
+    bg.className = "bgcell";
+    board.appendChild(bg);
+  }
+  S.board.forEach((v, i) => {
+    if (!v) return;
+    const tile = document.createElement("div");
+    tile.className = "tile t" + v + (v >= 1000 ? " long" : "");
+    tile.setAttribute("role", "gridcell");
+    tile.dataset.idx = i;
+    tile.textContent = v;
+    placeTile(tile, i);
+    board.appendChild(tile);
   });
-  $("score").textContent = S.score;
-  $("best").textContent = S.best;
+  renderScores();
   if (S.over) setStatus("Game over. Final score: " + S.score + ".");
 }
 
@@ -187,3 +245,8 @@ function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+/* Node smoke-test hook: require() exposes the pure logic only */
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { moveBoard, slideItems, isGameOver };
+}
