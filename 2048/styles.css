@@ -50,6 +50,13 @@ button.primary {
   touch-action: manipulation;
 }
 button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(6,182,212,.25); }
+#resetBestBtn {
+  padding: .55rem 1.1rem; font-family: var(--mono); font-size: .8rem; font-weight: 600;
+  background: var(--surf); color: var(--text);
+  border: 1px solid var(--border); border-radius: .625rem; cursor: pointer;
+  transition: border-color .15s; touch-action: manipulation;
+}
+#resetBestBtn:hover { border-color: rgba(6,182,212,.5); }
 
 /* Board */
 .board {
@@ -94,7 +101,7 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
 
 @media (max-width: 640px) {
   .controls { flex-direction: column; align-items: stretch; }
-  .controls button.primary { min-height: 44px; width: 100%; }
+  .controls button.primary, .controls #resetBestBtn { min-height: 44px; width: 100%; }
   #goBackBtn { min-height: 44px; }
   .scores { justify-content: stretch; }
   .score-box { flex: 1; }

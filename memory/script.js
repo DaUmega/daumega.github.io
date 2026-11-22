@@ -199,6 +199,14 @@ if (typeof document !== "undefined") {
     return true;
   }
 
+  /* Best scores only, for every grid size. The current game keeps going. */
+  function resetBest() {
+    saved.best = {};
+    save();
+    renderStats();
+    setStatus("Best scores cleared for all grid sizes.");
+  }
+
   function markSeg(size) {
     var btns = $("sizeSeg").querySelectorAll("button");
     btns.forEach(function (b) { b.classList.toggle("on", b.dataset.size === size); });
@@ -236,6 +244,7 @@ if (typeof document !== "undefined") {
       if (saved.size === "custom") startCustom();
       else startFromSeg(saved.size);
     });
+    $("resetBestBtn").addEventListener("click", resetBest);
     $("sizeSeg").querySelectorAll("button").forEach(function (b) {
       b.addEventListener("click", function () { startFromSeg(b.dataset.size); });
     });

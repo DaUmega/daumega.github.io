@@ -60,6 +60,13 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
   transition: border-color .15s; min-height: 44px; touch-action: manipulation;
 }
 #applyCustomBtn:hover { border-color: rgba(6,182,212,.5); }
+#resetBestBtn {
+  padding: .45rem 1rem; font-family: var(--mono); font-size: .8rem; font-weight: 600;
+  background: var(--surf); color: var(--text);
+  border: 1px solid var(--border); border-radius: .625rem; cursor: pointer;
+  transition: border-color .15s; min-height: 44px; touch-action: manipulation;
+}
+#resetBestBtn:hover { border-color: rgba(6,182,212,.5); }
 input[type="number"] {
   width: 4.5rem; padding: .45rem .55rem;
   font-family: var(--mono); font-size: .82rem; font-weight: 700; color: var(--text);
@@ -108,7 +115,7 @@ input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-i
 @media (max-width: 640px) {
   .controls { flex-direction: column; align-items: stretch; }
   .controls .seg { justify-content: center; }
-  .controls button.primary { width: 100%; }
+  .controls button.primary, .controls #resetBestBtn { width: 100%; }
   .custombar { justify-content: center; }
   .board { width: min(92vw, 34rem); }
 }

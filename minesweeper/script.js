@@ -319,6 +319,19 @@ function newGame(diff) {
   setStatus("");
 }
 
+/* Best times only, for every difficulty. The current game keeps going. */
+function resetBest() {
+  if (!S) return;
+  try {
+    localStorage.setItem(LSKEY, JSON.stringify({
+      diff: S.diff,
+      best: { beginner: null, intermediate: null, expert: null },
+    }));
+  } catch (e) {}
+  renderBoard();
+  setStatus("Best times cleared.");
+}
+
 /* --- wiring --- */
 
 function init() {
@@ -329,6 +342,7 @@ function init() {
   document.querySelectorAll("#diffSeg button").forEach(b =>
     b.addEventListener("click", () => { if (b.dataset.diff !== S.diff) newGame(b.dataset.diff); }));
   $("newBtn").addEventListener("click", () => newGame(S.diff));
+  $("resetBestBtn").addEventListener("click", resetBest);
   $("flagBtn").addEventListener("click", () => {
     flagMode = !flagMode;
     const btn = $("flagBtn");

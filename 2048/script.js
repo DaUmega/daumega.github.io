@@ -130,6 +130,14 @@ function newGame() {
   setStatus("");
 }
 
+/* Best score only. The current board keeps going. */
+function resetBest() {
+  if (!S) return;
+  S.best = 0;
+  update();
+  if (!S.over) setStatus("Best score cleared.");
+}
+
 function setStatus(m) { $("status").textContent = m; }
 
 function renderAll() {
@@ -153,6 +161,7 @@ function init() {
     else location.href = "../games.html";
   });
   $("newBtn").addEventListener("click", newGame);
+  $("resetBestBtn").addEventListener("click", resetBest);
   document.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
     const dir = { arrowleft: "left", a: "left", arrowright: "right", d: "right",

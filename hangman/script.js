@@ -176,12 +176,22 @@ function renderAll() {
 }
 
 /* --- wiring --- */
+function resetScore() {
+  if (!S) return;
+  S.wins = 0;
+  S.losses = 0;
+  save();
+  renderAll();
+  setStatus("Wins and losses cleared.");
+}
+
 function init() {
   $("goBackBtn").addEventListener("click", () => {
     if (history.length > 1) history.back();
     else location.href = "../games.html";
   });
   $("newBtn").addEventListener("click", () => newState());
+  $("resetScoreBtn").addEventListener("click", resetScore);
   document.addEventListener("keydown", e => {
     if (/^[a-zA-Z]$/.test(e.key)) guessLetter(e.key);
   });

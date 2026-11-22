@@ -51,14 +51,14 @@ button.primary {
   min-height: 44px;
 }
 button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(6,182,212,.25); }
-#flagBtn {
+#flagBtn, #resetBestBtn {
   padding: .45rem 1.1rem; font-family: var(--mono); font-size: .78rem; font-weight: 600;
   background: var(--surf); color: var(--text);
   border: 1px solid var(--border); border-radius: .625rem; cursor: pointer;
   transition: border-color .15s;
   min-height: 44px;
 }
-#flagBtn:hover { border-color: rgba(6,182,212,.5); }
+#flagBtn:hover, #resetBestBtn:hover { border-color: rgba(6,182,212,.5); }
 #flagBtn.on { color: #fff; border-color: rgba(6,182,212,.5); background: rgba(6,182,212,.08); }
 
 /* HUD: classic Windows panel, grey with a raised border,
@@ -137,7 +137,7 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
   .controls { flex-direction: column; align-items: stretch; }
   .seg { justify-content: center; }
   .seg button { flex: 1; }
-  #flagBtn, button.primary { width: 100%; }
+  #flagBtn, #resetBestBtn, button.primary { width: 100%; }
   .hud { gap: .75rem; }
   .board { padding: .35rem; }
 }

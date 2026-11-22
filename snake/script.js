@@ -262,6 +262,14 @@ if (typeof document !== "undefined") {
     newGame();
   }
 
+  /* Best score only. Size, speed, and custom speed stay as they are. */
+  function resetBest() {
+    best = 0;
+    savePrefs();
+    renderScore();
+    setStatus("Best score cleared.");
+  }
+
   const KEYS = {
     ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
     w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
@@ -317,6 +325,7 @@ if (typeof document !== "undefined") {
   startBtn.addEventListener("click", toggleStart);
   newBtn.addEventListener("click", newGame);
   $("resetSizeBtn").addEventListener("click", resetSize);
+  $("resetBestBtn").addEventListener("click", resetBest);
   $("applySpeedBtn").addEventListener("click", applyCustomSpeed);
   customSpeedInput.addEventListener("keydown", e => { if (e.key === "Enter") applyCustomSpeed(); });
   $("goBackBtn").addEventListener("click", () => {
