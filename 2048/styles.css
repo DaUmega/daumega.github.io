@@ -80,24 +80,6 @@ button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(
 .tile.t2048 { background: #22d3ee; color: #020817; }
 .tile.t4096, .tile.t8192, .tile.t16384 { background: #a5f3fc; color: #020817; }
 
-/* D-pad: same 4 buttons as Snake, for PC and mobile. Swipe on the
-   board already works on real touch screens, but a mouse drag in
-   desktop mobile emulation does not fire touch events, so the
-   buttons are the reliable way to move there. */
-.dpad {
-  display: grid; grid-template-columns: repeat(3, 3rem); grid-template-rows: repeat(2, 3rem);
-  gap: .4rem; margin: 1rem auto 0; width: max-content;
-}
-.dpad button {
-  min-width: 3rem; min-height: 3rem; font-size: 1.25rem; line-height: 1;
-  font-family: var(--mono); font-weight: 700;
-  background: var(--surf); color: var(--cyan);
-  border: 1px solid rgba(6,182,212,.35); border-radius: .5rem; cursor: pointer;
-  transition: background .15s; touch-action: manipulation;
-}
-.dpad button:hover { background: rgba(6,182,212,.12); }
-.dpad button:active { background: rgba(6,182,212,.25); }
-
 /* Help line under the board */
 .help { margin-top: .5rem; font-size: .75rem; color: var(--muted); }
 

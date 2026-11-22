@@ -153,10 +153,6 @@ function init() {
     else location.href = "../games.html";
   });
   $("newBtn").addEventListener("click", newGame);
-  $("upBtn").addEventListener("click", () => doMove("up"));
-  $("downBtn").addEventListener("click", () => doMove("down"));
-  $("leftBtn").addEventListener("click", () => doMove("left"));
-  $("rightBtn").addEventListener("click", () => doMove("right"));
   document.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
     const dir = { arrowleft: "left", a: "left", arrowright: "right", d: "right",
