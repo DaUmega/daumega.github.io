@@ -19,13 +19,25 @@
 
   <div class="addbar" id="addBar"></div>
 
+  <div class="custombar">
+    <label for="customSides">Custom die:</label>
+    <span class="d-prefix">d</span><input id="customSides" type="number" min="2" max="10000" step="1" placeholder="7" inputmode="numeric" aria-label="Custom die sides">
+    <button id="addCustomBtn" class="addbtn">Add die</button>
+    <span class="hint">Any sides, 2-10000.</span>
+  </div>
+
   <div class="pool" id="pool"></div>
 
   <div class="controls">
     <button id="rollBtn" class="primary">Roll</button>
     <button id="clearBtn">Clear</button>
     <span class="total" id="total"></span>
+    <label class="mod">Modifier <input id="mod" type="number" min="-1000" max="1000" step="1" placeholder="0" inputmode="numeric" aria-label="Modifier to total" title="Optional: added to the total, e.g. +5 or -2. Leave at 0 to ignore it."></label>
+    <span class="rolls" id="rolls">Rolls: 0</span>
+    <button id="resetRollsBtn">Reset rolls</button>
+    <label class="limit">Max rolls <input id="rollLimit" type="number" min="1" max="99" step="1" placeholder="&infin;" inputmode="numeric" aria-label="Maximum rolls" title="Optional: maximum rolls. Leave blank for unlimited."></label>
   </div>
+  <p class="help">Modifier is optional, it adds to the total. Max rolls is optional, leave it blank for unlimited rolls.</p>
   <p class="status" id="status"></p>
 
   <script src="script.js" defer></script>

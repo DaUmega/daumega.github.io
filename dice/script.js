@@ -1,58 +1,88 @@
-/* Dice roller: pool of d4-d100, hold dice between rolls, tap held dice to remove.
-   d6 renders pips, others show the number. Progress in localStorage only. */
+/* Dice roller: pool of d4-d100, hold dice between rolls,
+   tap held dice to remove. d6 renders pips, others show the number.
+   A custom d2-d10000 goes straight into the pool, like any die.
+   Optional modifier to total and rolls counter (with optional max)
+   persist in localStorage. */
 
 const SIDES = [4, 6, 8, 10, 12, 20, 100];
 const LSKEY = "daumega.dice.v1";
 const $ = id => document.getElementById(id);
 var S = null; // var so test harnesses can reach it
 
-/* pip positions (row, col) in a 3x3 grid for d6 faces */
-const PIPS = {
-  1: [[1,1]],
-  2: [[0,0],[2,2]],
-  3: [[0,0],[1,1],[2,2]],
-  4: [[0,0],[0,2],[2,0],[2,2]],
-  5: [[0,0],[0,2],[1,1],[2,0],[2,2]],
-  6: [[0,0],[0,2],[1,0],[1,2],[2,0],[2,2]],
-};
+/* Pip cells (0-8, row-major) in a 3x3 grid for d6 faces */
+const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
-function newState() { S = { dice: [] }; save(); renderAll(); }
+const validSides = n => Number.isInteger(n) && n >= 2 && n <= 10000;
+const int = (v, d = 0) => Number.isInteger(v) ? v : d;
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const limitMsg = () => "Roll limit reached (" + S.limit + "). Reset rolls to roll again.";
+
+function newState() { S = { dice: [], rolls: 0, limit: 0, mod: 0 }; update(); }
 function save() { try { localStorage.setItem(LSKEY, JSON.stringify(S)); } catch (e) {} }
+function update() { save(); renderAll(); }
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(LSKEY));
-    if (d && Array.isArray(d.dice)) { S = d; return true; }
+    if (d && Array.isArray(d.dice)) {
+      // Older saves may lack the newer fields; fill them in.
+      // Any saved custom sides are ignored now, custom dice live only in the pool.
+      S = { dice: d.dice, rolls: int(d.rolls), limit: int(d.limit), mod: int(d.mod) };
+      return true;
+    }
   } catch (e) {}
   return false;
 }
 
-function addDie(sides) { S.dice.push({ sides, value: 0, held: false, removeOnRoll: false }); save(); renderAll(); }
+function addDie(sides) { S.dice.push({ sides, value: 0, held: false, removeOnRoll: false }); update(); }
+
+function addCustomDie() {
+  const input = $("customSides");
+  const sides = Number(input.value);
+  if (!validSides(sides)) {
+    setStatus("Enter a whole number of sides from 2 to 10000, e.g. 7 or 30.");
+    input.focus();
+    return;
+  }
+  addDie(sides);
+  setStatus("");
+  input.value = "";
+  input.focus();
+}
+
 function toggleDieState(i) {
   const die = S.dice[i];
-  if (die.removeOnRoll) {
-    die.held = false;
-    die.removeOnRoll = false;
-  } else if (die.held) {
-    die.removeOnRoll = true;
-  } else {
-    die.held = true;
-  }
-  save(); renderAll();
+  if (die.removeOnRoll) { die.held = false; die.removeOnRoll = false; }
+  else if (die.held) { die.removeOnRoll = true; }
+  else { die.held = true; }
+  update();
 }
-function clearDice() { S.dice = []; save(); renderAll(); }
+function clearDice() { S.dice = []; S.rolls = 0; setStatus(""); update(); }
+function resetRolls() { S.rolls = 0; setStatus(""); update(); }
+
+function setLimit(value) {
+  S.limit = value === "" ? 0 : clamp(Math.floor(Number(value) || 0), 1, 99);
+  if (S.limit && S.rolls > S.limit) S.rolls = S.limit;
+  update();
+}
+function setMod(value) {
+  S.mod = value === "" ? 0 : clamp(Math.floor(Number(value) || 0), -1000, 1000);
+  update();
+}
 
 function roll() {
   if (!S.dice.length) { setStatus("Add some dice first."); return; }
+  if (S.limit && S.rolls >= S.limit) { setStatus(limitMsg()); return; }
   S.dice = S.dice.filter(d => !d.removeOnRoll);
   const rollable = S.dice.filter(d => !d.held);
   if (!rollable.length) {
     setStatus(S.dice.length ? "All dice are held." : "");
-    save(); renderAll();
+    update();
     return;
   }
   rollable.forEach(d => d.value = 1 + ((Math.random() * d.sides) | 0));
-  setStatus("");
-  save(); renderAll();
+  S.rolls += 1; // counts every roll that actually rolled a die, first roll included
+  setStatus(S.limit && S.rolls >= S.limit ? limitMsg() : "");
+  update();
 }
 
 function setStatus(m) { $("status").textContent = m; }
@@ -67,19 +97,21 @@ function dieEl(d, i) {
   if (d.sides === 6 && d.value) {
     const g = document.createElement("span");
     g.className = "pips";
-    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    for (let c = 0; c < 9; c++) {
       const p = document.createElement("span");
-      p.className = "pip" + (PIPS[d.value].some(([pr, pc]) => pr === r && pc === c) ? " on" : "");
+      p.className = "pip" + (PIPS[d.value].includes(c) ? " on" : "");
       g.appendChild(p);
     }
     el.appendChild(g);
   } else {
-    el.innerHTML = '<span class="dval">' + (d.value || "&ndash;") +
+    el.innerHTML = '<span class="dval' + (String(d.value).length > 3 ? " long" : "") + '">' + (d.value || "&ndash;") +
       '</span><span class="dtag">d' + d.sides + "</span>";
   }
   el.addEventListener("click", () => toggleDieState(i));
   return el;
 }
+
+function syncInput(input, value) { if (document.activeElement !== input) input.value = value || ""; }
 
 function renderAll() {
   const pool = $("pool");
@@ -91,11 +123,16 @@ function renderAll() {
   }
   const rolled = S.dice.filter(d => d.value);
   $("total").textContent = rolled.length ?
-    "Total: " + rolled.reduce((a, d) => a + d.value, 0) : "";
+    "Total: " + (rolled.reduce((a, d) => a + d.value, 0) + S.mod) + (S.mod ? " (" + (S.mod > 0 ? "+" : "") + S.mod + ")" : "") : "";
+  $("rolls").textContent = S.limit ? "Rolls: " + S.rolls + "/" + S.limit : "Rolls: " + S.rolls;
+  $("rollBtn").disabled = Boolean(S.limit && S.rolls >= S.limit);
+  syncInput($("rollLimit"), S.limit);
+  syncInput($("mod"), S.mod);
 }
 
 function buildAddBar() {
   const bar = $("addBar");
+  bar.innerHTML = "";
   SIDES.forEach(s => {
     const b = document.createElement("button");
     b.className = "addbtn";
@@ -109,13 +146,19 @@ function init() {
   $("goBackBtn").addEventListener("click", () => location.href = "../index.html");
   $("rollBtn").addEventListener("click", roll);
   $("clearBtn").addEventListener("click", clearDice);
+  $("resetRollsBtn").addEventListener("click", resetRolls);
+  $("addCustomBtn").addEventListener("click", addCustomDie);
+  $("customSides").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addCustomDie(); } });
+  $("rollLimit").addEventListener("input", e => setLimit(e.target.value));
+  $("mod").addEventListener("input", e => setMod(e.target.value));
   document.addEventListener("keydown", e => {
     if (e.code === "Space" && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) {
       e.preventDefault(); roll();
     }
   });
+  if (!load()) newState();
   buildAddBar();
-  if (!load()) newState(); else renderAll();
+  renderAll();
 }
 
 document.addEventListener("DOMContentLoaded", init);
