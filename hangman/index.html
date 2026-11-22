@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hangman</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Hangman</h1>
+    <p class="sub">Guess the hidden word, one letter at a time. The word can be any length. Six wrong guesses and the game is over.</p>
+    <div class="controls">
+      <button id="newBtn" class="primary">New word</button>
+      <span class="score" id="score"></span>
+    </div>
+  </div>
+
+  <div class="game">
+    <svg id="gallows" viewBox="0 0 200 220" aria-label="Hangman drawing" role="img">
+      <g class="part" id="part0" stroke-linecap="round">
+        <line x1="20" y1="205" x2="100" y2="205" />
+        <line x1="50" y1="205" x2="50" y2="15" />
+        <line x1="50" y1="15" x2="140" y2="15" />
+        <line x1="140" y1="15" x2="140" y2="40" />
+      </g>
+      <g class="part" id="part1"><circle cx="140" cy="58" r="18" /></g>
+      <g class="part" id="part2"><line x1="140" y1="76" x2="140" y2="130" /></g>
+      <g class="part" id="part3"><line x1="140" y1="92" x2="112" y2="112" /></g>
+      <g class="part" id="part4"><line x1="140" y1="92" x2="168" y2="112" /></g>
+      <g class="part" id="part5">
+        <line x1="140" y1="130" x2="118" y2="168" />
+        <line x1="140" y1="130" x2="162" y2="168" />
+      </g>
+    </svg>
+
+    <div class="word" id="word" aria-label="hidden word"></div>
+    <p class="wrong" id="wrong"></p>
+    <p class="status" id="status"></p>
+    <div class="kbd" id="kbd"></div>
+  </div>
+
+  <p class="help">Type on your keyboard or tap the letters below. Wins and losses are saved on this device.</p>
+
+  <script src="../wordle/words.js" defer></script>
+  <script src="script.js" defer></script>
+</body>
+</html>

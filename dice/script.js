@@ -143,7 +143,10 @@ function buildAddBar() {
 }
 
 function init() {
-  $("goBackBtn").addEventListener("click", () => location.href = "../index.html");
+  $("goBackBtn").addEventListener("click", () => {
+    if (history.length > 1) history.back();
+    else location.href = "../games.html";
+  });
   $("rollBtn").addEventListener("click", roll);
   $("clearBtn").addEventListener("click", clearDice);
   $("resetRollsBtn").addEventListener("click", resetRolls);

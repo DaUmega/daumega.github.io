@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minesweeper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Minesweeper</h1>
+    <p class="sub">Clear the board without hitting a mine. Numbers show how many mines touch that cell.</p>
+    <div class="controls">
+      <div class="seg" id="diffSeg" role="tablist" aria-label="difficulty">
+        <button data-diff="beginner" class="on">Beginner</button>
+        <button data-diff="intermediate">Intermediate</button>
+        <button data-diff="expert">Expert</button>
+      </div>
+      <button id="flagBtn" aria-pressed="false">Flag mode: off</button>
+      <button id="newBtn" class="primary">New game</button>
+    </div>
+  </div>
+
+  <div class="hud" aria-label="game status">
+    <span class="hud-item">Mines: <strong id="mineCount">10</strong></span>
+    <button id="faceBtn" class="face" aria-label="New game">:)</button>
+    <span class="hud-item">Time: <strong id="timer">0</strong>s</span>
+    <span class="hud-item">Best: <strong id="bestTime">&ndash;</strong></span>
+  </div>
+
+  <div class="board-wrap">
+    <div class="board" id="board" role="grid" aria-label="minesweeper board"></div>
+  </div>
+
+  <p class="status" id="status"></p>
+  <p class="help">Left-click to reveal a cell. Right-click or long-press (about half a second) to flag it. Left+right click together, or double-click, a number to open its unflagged neighbours when the flags around it match the number. The first click is always safe.</p>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

@@ -11,6 +11,11 @@ const games = [
   { name: "Crosswords & Fill-ins", desc: "In-browser crossword and fill-in puzzles with difficulty levels and license-plate fill-ins. Progress saves locally.", link: "crosswords/index.html" },
   { name: "Sudoku", desc: "In-browser Sudoku with 4 difficulty levels, guaranteed unique solutions, and hint/check tools. Progress saves locally.", link: "sudoku/index.html"},
   { name: "Wordle", desc: "Guess the hidden word in 6 tries. 4 difficulty levels by word length, keyboard included. Progress saves locally.", link: "wordle/index.html"},
+  { name: "Snake", desc: "Classic Snake. 20x20 by default, custom size and speed, arrows, WASD, swipe, and D-pad. Best score saves locally.", link: "snake/index.html"},
+  { name: "Memory Match", desc: "Flip pairs to match. 4x4 by default, custom grids, moves and timer, best moves per grid size saves locally.", link: "memory/index.html"},
+  { name: "Hangman", desc: "Guess the word in 6 wrong guesses. The word can be any length, on-screen keyboard. Wins and losses save locally.", link: "hangman/index.html"},
+  { name: "2048", desc: "Slide tiles as long as you can. Arrow keys, WASD, and swipe. Score and best save locally.", link: "2048/index.html"},
+  { name: "Minesweeper", desc: "Classic Minesweeper. Beginner, Intermediate, and Expert, first click always safe. Best times save locally.", link: "minesweeper/index.html"},
 ];
 
 function renderCards(items, listId) {

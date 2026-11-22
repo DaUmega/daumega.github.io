@@ -1,0 +1,120 @@
+:root {
+  --bg:     #020817;
+  --surf:   #0d1829;
+  --border: rgba(255,255,255,0.07);
+  --cyan:   #06b6d4;
+  --text:   #e2e8f0;
+  --muted:  #64748b;
+  --mono:   'JetBrains Mono', monospace;
+  --disp:   'Syne', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html  { background: var(--bg); }
+body  { font-family: var(--mono); font-size: .9rem; line-height: 1.7; color: var(--text); background: var(--bg); max-width: 72rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+a     { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Header */
+.page-header { margin-bottom: 1.25rem; }
+h1   { font-family: var(--disp); font-size: clamp(1.6rem, 4vw, 2.2rem); font-weight: 800; color: #fff; margin: .5rem 0 .25rem; }
+.sub { font-size: .8rem; color: var(--muted); }
+
+#goBackBtn {
+  padding: .45rem 1rem; margin-bottom: .75rem;
+  font-family: var(--mono); font-size: .8rem; font-weight: 600;
+  background: none; color: var(--cyan);
+  border: 1px solid rgba(6,182,212,.35); border-radius: .5rem;
+  cursor: pointer; transition: background .2s, border-color .2s;
+  touch-action: manipulation;
+}
+#goBackBtn:hover { background: rgba(6,182,212,.08); border-color: rgba(6,182,212,.6); }
+
+/* Scores */
+.scores { display: flex; gap: .6rem; margin-bottom: 1rem; }
+.score-box {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 6rem; padding: .45rem 1rem;
+  background: var(--surf); border: 1px solid var(--border); border-radius: .625rem;
+}
+.score-label { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.score-value { font-size: 1.15rem; font-weight: 700; color: #fff; line-height: 1.3; }
+
+/* Controls */
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin-bottom: 1.25rem; }
+button.primary {
+  padding: .55rem 1.6rem; font-family: var(--mono); font-size: .85rem; font-weight: 700;
+  background: linear-gradient(135deg,#0891b2,#1d4ed8); color: #fff;
+  border: none; border-radius: .625rem; cursor: pointer;
+  transition: transform .15s, box-shadow .15s;
+  touch-action: manipulation;
+}
+button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(6,182,212,.25); }
+
+/* Board */
+.board {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem;
+  width: 100%; max-width: min(92vw, 480px);
+  padding: .5rem;
+  background: var(--surf); border: 1px solid var(--border); border-radius: .75rem;
+  touch-action: none;
+  user-select: none; -webkit-user-select: none;
+}
+.tile {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: clamp(1.4rem, 6vw, 2rem); font-weight: 700;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: .5rem;
+  color: var(--text);
+}
+.tile.long { font-size: clamp(1rem, 4.5vw, 1.5rem); }
+.tile.t2    { background: #0d1829; color: #e2e8f0; }
+.tile.t4    { background: #16233a; color: #e2e8f0; }
+.tile.t8    { background: #155e75; color: #ecfeff; }
+.tile.t16   { background: #0e7490; color: #ecfeff; }
+.tile.t32   { background: #0891b2; color: #fff; }
+.tile.t64   { background: #0284c7; color: #fff; }
+.tile.t128  { background: #0369a1; color: #fff; }
+.tile.t256  { background: #1d4ed8; color: #fff; }
+.tile.t512  { background: #2563eb; color: #fff; }
+.tile.t1024 { background: #06b6d4; color: #020817; }
+.tile.t2048 { background: #22d3ee; color: #020817; }
+.tile.t4096, .tile.t8192, .tile.t16384 { background: #a5f3fc; color: #020817; }
+
+/* D-pad: same 4 buttons as Snake, for PC and mobile. Swipe on the
+   board already works on real touch screens, but a mouse drag in
+   desktop mobile emulation does not fire touch events, so the
+   buttons are the reliable way to move there. */
+.dpad {
+  display: grid; grid-template-columns: repeat(3, 3rem); grid-template-rows: repeat(2, 3rem);
+  gap: .4rem; margin: 1rem auto 0; width: max-content;
+}
+.dpad button {
+  min-width: 3rem; min-height: 3rem; font-size: 1.25rem; line-height: 1;
+  font-family: var(--mono); font-weight: 700;
+  background: var(--surf); color: var(--cyan);
+  border: 1px solid rgba(6,182,212,.35); border-radius: .5rem; cursor: pointer;
+  transition: background .15s; touch-action: manipulation;
+}
+.dpad button:hover { background: rgba(6,182,212,.12); }
+.dpad button:active { background: rgba(6,182,212,.25); }
+
+/* Help line under the board */
+.help { margin-top: .5rem; font-size: .75rem; color: var(--muted); }
+
+/* Status */
+.status { margin-top: .9rem; min-height: 1.6em; font-size: .82rem; color: var(--muted); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: rgba(6,182,212,.3); border-radius: 3px; }
+::selection { background: rgba(6,182,212,.22); color: var(--cyan); }
+
+@media (max-width: 640px) {
+  .controls { flex-direction: column; align-items: stretch; }
+  .controls button.primary { min-height: 44px; width: 100%; }
+  #goBackBtn { min-height: 44px; }
+  .scores { justify-content: stretch; }
+  .score-box { flex: 1; }
+  .board { gap: .35rem; padding: .35rem; }
+}

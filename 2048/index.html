@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2048</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>2048</h1>
+    <p class="sub">Slide the tiles with arrow keys, WASD, or a swipe. Equal tiles merge into one. There is no target to reach, keep going until no moves are left.</p>
+  </div>
+
+  <div class="scores">
+    <div class="score-box"><span class="score-label">Score</span><span class="score-value" id="score">0</span></div>
+    <div class="score-box"><span class="score-label">Best</span><span class="score-value" id="best">0</span></div>
+  </div>
+
+  <div class="controls">
+    <button id="newBtn" class="primary">New game</button>
+  </div>
+
+  <div class="board" id="board" role="grid" aria-label="2048 board"></div>
+
+  <div class="dpad" aria-label="Direction pad">
+    <span></span>
+    <button id="upBtn" aria-label="Move up">&#8593;</button>
+    <span></span>
+    <button id="leftBtn" aria-label="Move left">&#8592;</button>
+    <button id="downBtn" aria-label="Move down">&#8595;</button>
+    <button id="rightBtn" aria-label="Move right">&#8594;</button>
+  </div>
+
+  <p class="status" id="status"></p>
+  <p class="help">Arrow keys or WASD to move. Swipe on the board, or tap the arrow buttons below it. Merging two equal tiles adds their value to your score.</p>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

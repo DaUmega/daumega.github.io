@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memory Match</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="page-header">
+    <button id="goBackBtn">&#8592; Back</button>
+    <h1>Memory Match</h1>
+    <p class="sub">Flip two cards at a time and find all the matching pairs. Fewest moves wins.</p>
+    <div class="controls">
+      <div class="seg" id="sizeSeg" role="tablist" aria-label="grid size">
+        <button data-size="4x4" class="on">4x4</button>
+        <button data-size="4x6">4x6</button>
+        <button data-size="6x6">6x6</button>
+        <button data-size="8x8">8x8</button>
+        <button data-size="custom">Custom</button>
+      </div>
+      <button id="newBtn" class="primary">New game</button>
+    </div>
+    <div class="custombar">
+      <label for="customRows">Custom:</label>
+      <input id="customRows" type="number" min="2" max="8" step="1" value="4" inputmode="numeric" aria-label="Custom rows">
+      <span class="x-mark">x</span>
+      <input id="customCols" type="number" min="2" max="8" step="1" value="4" inputmode="numeric" aria-label="Custom columns">
+      <button id="applyCustomBtn">Apply</button>
+      <span class="hint">Rows and columns 2-8, even total cells only. Largest is 8x8.</span>
+    </div>
+  </div>
+
+  <p class="stats" id="stats"></p>
+
+  <div class="board" id="board" role="grid" aria-label="memory board"></div>
+
+  <p class="status" id="status"></p>
+  <p class="help">Timer starts on your first flip and stops when you find the last pair. Your best (fewest moves) is saved per grid size.</p>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
