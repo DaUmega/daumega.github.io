@@ -202,7 +202,10 @@ async function confirmNew() {
 }
 
 function init() {
-  $("goBackBtn").addEventListener("click", () => location.href = "../index.html");
+  $("goBackBtn").addEventListener("click", () => {
+    if (history.length > 1) history.back();
+    else location.href = "../games.html";
+  });
   document.querySelectorAll("#diffSeg button").forEach(b =>
     b.addEventListener("click", async () => { if (b.dataset.diff !== S.diff && await confirmNew()) newState(b.dataset.diff); }));
   $("newBtn").addEventListener("click", async () => { if (await confirmNew()) newState(S ? S.diff : "medium"); });

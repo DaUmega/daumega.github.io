@@ -277,7 +277,10 @@ async function confirmNew() {
 function init() {
   buildGrid();
   buildPad();
-  $("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
+  $("goBackBtn").addEventListener("click", () => {
+    if (history.length > 1) history.back();
+    else location.href = "../games.html";
+  });
   document.querySelectorAll("#diffSeg button").forEach(b =>
     b.addEventListener("click", async () => {
       if (b.dataset.diff === S.diff) return;

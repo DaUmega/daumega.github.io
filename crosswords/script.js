@@ -739,7 +739,10 @@ async function confirmNew() {
 }
 
 function wireControls() {
-  $("goBackBtn").addEventListener("click", () => { window.location.href = "../index.html"; });
+  $("goBackBtn").addEventListener("click", () => {
+    if (history.length > 1) history.back();
+    else location.href = "../games.html";
+  });
   document.querySelectorAll("#modeSeg button").forEach(b =>
     b.addEventListener("click", async () => {
       const m = b.dataset.mode;
